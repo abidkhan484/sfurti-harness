@@ -1,0 +1,48 @@
+{
+  "timezone": "Asia/Dhaka",
+  "topic": "Unintentional screen time and meaningful alternatives for children",
+  "daily": {
+    "videos": 3,
+    "images": 1,
+    "texts": 1,
+    "productionTimes": ["06:00", "07:00", "08:00"]
+  },
+  "audience": {
+    "language": "bn",
+    "minAge": 3,
+    "maxAge": 15,
+    "segments": ["general", "3-5", "6-9", "10-12", "13-15"]
+  },
+  "video": {
+    "format": "reel",
+    "aspectRatio": "9:16",
+    "minSeconds": 30,
+    "maxSeconds": 60,
+    "preferOriginalBangla": true,
+    "allowBanglaDubbing": true
+  },
+  "review": {
+    "automaticApproval": true,
+    "maxIterations": 3,
+    "initialRenderCountsAsIteration": true
+  },
+  "llm": {
+    "provider": "codex"
+  },
+  "storage": {
+    "databasePath": "./data/sfurti.sqlite",
+    "mediaDirectory": "./data/media"
+  },
+  "posting": {
+    "windowsFile": "./config/posting-windows.json",
+    "minSpacingMinutes": null,
+    "queueCsvPath": "./data/exports/upload-queue.csv"
+  },
+  "reserve": {
+    "minimumDays": 90,
+    "continueAboveMinimum": true
+  },
+  "custom": {
+    "scheduleByDefault": false
+  }
+}

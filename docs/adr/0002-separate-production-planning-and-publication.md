@@ -1,0 +1,3 @@
+# Separate production, local planning, and Facebook publication
+
+The library can contain thousands of artifacts and must support at least 90 days of approved, timed content even when Facebook cannot yet accept distant schedules. Production therefore fills a persistent library, a scheduler allocates eligible artifacts to local plans, and a Facebook component submits and reconciles publication independently; a filesystem CSV reflects queue state. This adds distinct states and reconciliation work, but prevents platform scheduling limits, retries, and future configuration changes from forcing content regeneration or duplicate posts.

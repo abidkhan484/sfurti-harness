@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+config/harness.json
+
+# Generated content, queue exports, and SQLite state
+data/
+
+# Local issue-tracker workspace
+.scratch/
+
+# Build output, logs, and coverage
+dist/
+build/
+coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
