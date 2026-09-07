@@ -18,7 +18,8 @@ export class TelegramOperator implements OperatorDelivery {
     let command: unknown;
     try { command = JSON.parse(message.text); } catch { throw new AdapterError('protocol', 'Operator request must be a JSON command with a type'); }
     if (!isRecord(command) || typeof command.type !== 'string') throw new AdapterError('protocol', 'Operator request must include a command type');
-    return this.app.execute(command as {type:string;[key:string]:unknown});
+    if (!Number.isSafeInteger(update.update_id) || Number(update.update_id) < 0) throw new AdapterError('protocol', 'Telegram update ID is required for durable deduplication');
+    return this.app.execute({ ...command, type: command.type, commandId: `telegram:${update.update_id}` });
   }
   async deliver(message: { text: string; artifactPaths?: string[] }): Promise<void> {
     if (!this.transport) throw new AdapterError('configuration', 'Telegram delivery transport is not configured');

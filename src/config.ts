@@ -13,7 +13,7 @@ export interface Config {
   posting: {windowsFile:string;windows?:{start:string;end:string}[];minSpacingMinutes:number|null;queueCsvPath:string;[key:string]:any};
   reserve: {minimumDays:number;continueAboveMinimum:boolean};
   custom: {scheduleByDefault:boolean};
-  limits: {concurrency:number;maxTasksPerTick:number;taskTimeoutMs:number;leaseMs:number;backoffMs:number;minFreeBytes:number;tickMs:number};
+  limits: {concurrency:number;maxTasksPerTick:number;maxTasksPerDay:number;taskTimeoutMs:number;leaseMs:number;backoffMs:number;minFreeBytes:number;tickMs:number};
   integrations?: Record<string, any>;
   setup?: {verifiedSample?:string;verifiedAt?:string};
 }
@@ -26,7 +26,7 @@ const defaults: Config = {
   storage:{databasePath:'./data/sfurti.sqlite',mediaDirectory:'./data/media'},
   posting:{windowsFile:'./config/posting-windows.json',minSpacingMinutes:null,queueCsvPath:'./data/exports/upload-queue.csv'},
   reserve:{minimumDays:90,continueAboveMinimum:true},custom:{scheduleByDefault:false},
-  limits:{concurrency:1,maxTasksPerTick:5,taskTimeoutMs:120000,leaseMs:180000,backoffMs:60000,minFreeBytes:104857600,tickMs:30000},
+  limits:{concurrency:1,maxTasksPerTick:5,maxTasksPerDay:20,taskTimeoutMs:120000,leaseMs:180000,backoffMs:60000,minFreeBytes:104857600,tickMs:30000},
 };
 function merge(base:any, input:any):any {
   const result=structuredClone(base);

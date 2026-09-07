@@ -1,10 +1,10 @@
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, backup } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 export interface RecordData { id: string; [key: string]: any }
 const collections = ['plans', 'jobs', 'tasks', 'keywords', 'keyword_batches', 'sources',
-  'matches', 'permissions', 'segments', 'artifacts', 'reviews', 'posts', 'meta', 'notifications'];
+  'matches', 'permissions', 'segments', 'artifacts', 'reviews', 'posts', 'meta', 'notifications', 'manual_retries'];
 
 /** One writer transaction owns decisions; external work must occur outside transaction(). */
 export class Store {
@@ -55,6 +55,7 @@ export class Store {
       throw error;
     } finally { this.depth--; }
   }
+  async backup(path: string): Promise<void> { await backup(this.db,path); }
   checkpoint(): void { this.db.exec('PRAGMA wal_checkpoint(FULL)'); }
   close(): void { this.db.close(); }
 }
