@@ -37,7 +37,12 @@
     "initialRenderCountsAsIteration": true
   },
   "llm": {
-    "provider": "codex"
+    "taskModels": {
+      "review": {
+        "provider": "codex",
+        "model": "YOUR_CODEX_MODEL"
+      }
+    }
   },
   "storage": {
     "databasePath": "./data/sfurti.sqlite",

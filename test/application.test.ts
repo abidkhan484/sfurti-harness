@@ -22,6 +22,13 @@ test('configuration accepts zero overrides, rejects malformed counts, and seals 
   } finally { app.close(); rmSync(root,{recursive:true,force:true}); }
 });
 
+test('LLM configuration requires explicit task routes and rejects the retired global provider', async () => {
+  const {loadConfig}=await import('../src/config.ts');
+  assert.throws(()=>loadConfig({llm:{provider:'codex'}} as any,{}),/llm\.provider is no longer supported/);
+  const config=loadConfig({llm:{taskModels:{review:{provider:'codex',model:'review-model'}}}} as any,{});
+  assert.deepEqual(config.llm.taskModels.review,{provider:'codex',model:'review-model'});
+});
+
 test('durable command identity returns one snapshot after restart and rejects changed payload',async()=>{
   const root=mkdtempSync(join(tmpdir(),'sfurti-replay-'));
   const config={storage:{databasePath:join(root,'db'),mediaDirectory:join(root,'media')}};

@@ -8,7 +8,7 @@ export interface Config {
   audience: {language:string;minAge:number;maxAge:number;segments:string[]};
   video: {format:string;aspectRatio:string;minSeconds:number;maxSeconds:number;preferOriginalBangla:boolean;allowBanglaDubbing:boolean};
   review: {automaticApproval:boolean;maxIterations:number;initialRenderCountsAsIteration:boolean};
-  llm: {provider:string};
+  llm: {taskModels: Record<string,{provider:string;model:string}>};
   storage: {databasePath:string;mediaDirectory:string;backupDirectory?:string};
   posting: {windowsFile:string;windows?:{start:string;end:string}[];minSpacingMinutes:number|null;queueCsvPath:string;[key:string]:any};
   reserve: {minimumDays:number;continueAboveMinimum:boolean};
@@ -22,7 +22,7 @@ const defaults: Config = {
   daily:{videos:3,images:1,texts:1,productionTimes:['06:00','07:00','08:00']},
   audience:{language:'bn',minAge:3,maxAge:15,segments:['general','3-5','6-9','10-12','13-15']},
   video:{format:'reel',aspectRatio:'9:16',minSeconds:30,maxSeconds:60,preferOriginalBangla:true,allowBanglaDubbing:true},
-  review:{automaticApproval:true,maxIterations:3,initialRenderCountsAsIteration:true},llm:{provider:'codex'},
+  review:{automaticApproval:true,maxIterations:3,initialRenderCountsAsIteration:true},llm:{taskModels:{}},
   storage:{databasePath:'./data/sfurti.sqlite',mediaDirectory:'./data/media'},
   posting:{windowsFile:'./config/posting-windows.json',minSpacingMinutes:null,queueCsvPath:'./data/exports/upload-queue.csv'},
   reserve:{minimumDays:90,continueAboveMinimum:true},custom:{scheduleByDefault:false},
@@ -57,6 +57,12 @@ export function loadConfig(input: Partial<Config>|Record<string,unknown> = {}, e
   if(config.review.maxIterations!==3||!config.review.initialRenderCountsAsIteration||!config.review.automaticApproval) throw new Error('Review requires three total versions with automatic approval only after passing');
   if(config.video.aspectRatio!=='9:16'||config.video.minSeconds<30||config.video.maxSeconds>60||config.video.minSeconds>config.video.maxSeconds) throw new Error('Reels must be vertical and 30–60 seconds');
   if(config.custom.scheduleByDefault!==false) throw new Error('Custom scheduling requires explicit intent');
+  if (!config.llm || typeof config.llm !== 'object' || Array.isArray(config.llm)) throw new Error('llm must contain taskModels');
+  if ('provider' in (config.llm as Record<string,unknown>)) throw new Error('llm.provider is no longer supported; configure llm.taskModels.<taskType>.provider and .model explicitly');
+  if (!config.llm.taskModels || typeof config.llm.taskModels !== 'object' || Array.isArray(config.llm.taskModels)) throw new Error('llm.taskModels must be an object');
+  for (const [taskType, assignment] of Object.entries(config.llm.taskModels)) {
+    if (!['generation','review'].includes(taskType) || !assignment || typeof assignment !== 'object' || typeof assignment.provider !== 'string' || !assignment.provider.trim() || typeof assignment.model !== 'string' || !assignment.model.trim()) throw new Error(`llm.taskModels.${taskType} requires a nonempty provider and model`);
+  }
   if(!Number.isSafeInteger(config.reserve.minimumDays)||config.reserve.minimumDays<90||config.reserve.continueAboveMinimum!==true) throw new Error('Planning floor must be at least 90 days and permit continued generation');
   if(!Array.isArray(config.daily.productionTimes)||config.daily.productionTimes.some(t=>!/^([01]\d|2[0-3]):[0-5]\d$/.test(t))) throw new Error('Invalid daily production time');
   for(const [key,value] of Object.entries(config.limits)) if(!Number.isSafeInteger(value)||value<=0) throw new Error(`limits.${key} must be a positive integer`);

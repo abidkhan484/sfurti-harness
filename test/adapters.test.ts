@@ -43,13 +43,14 @@ test('Codex decisions use independent restricted contexts and distinguish tokens
   const {join}=await import('node:path');
   const root=await mkdtemp(join(tmpdir(),'sfurti-test-auth-'));
   await writeFile(join(root,'auth.json'),'{}');
-  const homes:string[]=[];
+  const homes:string[]=[], models:string[]=[];
   try {
-    const strategy=new CodexStrategy({model:'configured-model',authFile:join(root,'auth.json')},options=>{
+    const strategy=new CodexStrategy({authFile:join(root,'auth.json'),models:['configured-model']},options=>{
       assert.equal(options.config?.features && typeof options.config.features==='object' && !Array.isArray(options.config.features) ? options.config.features.shell_tool:undefined,false);
       assert.equal(options.env?.TELEGRAM_BOT_TOKEN,undefined);
       homes.push(options.env!.CODEX_HOME);
       return {startThread:options=>{
+        models.push(String(options.model));
         assert.equal(options.sandboxMode,'read-only');
         assert.equal(options.approvalPolicy,'never');
         assert.equal(options.networkAccessEnabled,false);
@@ -57,13 +58,47 @@ test('Codex decisions use independent restricted contexts and distinguish tokens
       }};
     });
     const request={purpose:'review' as const,prompt:'untrusted evidence',schema:{type:'object'},validate:(v:unknown):v is {passed:boolean}=>typeof v==='object' && v!==null && 'passed' in v && typeof v.passed==='boolean'};
-    const result=await strategy.structured(request);
-    await strategy.structured(request);
+    const result=await strategy.structured('configured-model',request);
+    await strategy.structured('configured-model',request);
     assert.notEqual(homes[0],homes[1]);
+    assert.deepEqual(models,['configured-model','configured-model']);
     assert.equal(result.usage!.input_tokens,10);
     assert.equal(result.capacity.remaining,null);
-    await assert.rejects(strategy.structured({...request,requiredCapabilities:['video']}),(e:unknown)=>e instanceof AdapterError && e.kind==='rejected');
+    await assert.rejects(strategy.structured('configured-model',{...request,requiredCapabilities:['video']}),(e:unknown)=>e instanceof AdapterError && e.kind==='rejected');
   } finally {await rm(root,{recursive:true,force:true});}
+});
+
+test('Codex rejects the retired single-model configuration', async () => {
+  const {CodexStrategy}=await import('../src/adapters/codex.ts');
+  assert.throws(()=>new CodexStrategy({model:'old-model',authFile:'/private/auth.json'} as any),(e:unknown)=>e instanceof AdapterError&&/llm\.taskModels/.test(e.message));
+});
+
+test('LLM task routes dispatch configured models and reject missing, unknown, and unsupported routes', async () => {
+  const {TaskModelRouter}=await import('../src/adapters/llm.ts');
+  const calls:any[]=[];
+  const provider={
+    capabilities:{text:true,images:true,audio:false,video:false},
+    supportsModel:(model:string)=>['small','strong'].includes(model),
+    structured:async <T>(model:string,request:any):Promise<any>=>{calls.push({model,purpose:request.purpose});return {value:{ok:true} as T,provider:'fake',model,usage:null,capacity:{remaining:null},threadId:null};},
+  };
+  const router=new TaskModelRouter({generation:{provider:'fake',model:'small'},review:{provider:'fake',model:'strong'}},{fake:provider});
+  const request={purpose:'generation' as const,prompt:'x',schema:{},validate:(value:unknown):value is {ok:boolean}=>typeof value==='object'&&value!==null};
+  await router.structured('generation',request);
+  await router.structured('review',{...request,purpose:'review'});
+  assert.deepEqual(calls,[{model:'small',purpose:'generation'},{model:'strong',purpose:'review'}]);
+  assert.throws(()=>new TaskModelRouter({review:{provider:'missing',model:'x'}},{fake:provider}),(e:unknown)=>e instanceof AdapterError&&/unknown provider/.test(e.message));
+  assert.throws(()=>new TaskModelRouter({review:{provider:'fake',model:'missing'}},{fake:provider}),(e:unknown)=>e instanceof AdapterError&&/unsupported/.test(e.message));
+  await assert.rejects(new TaskModelRouter({}, {fake:provider}).structured('review',{...request,purpose:'review'}),(e:unknown)=>e instanceof AdapterError&&/no configured/.test(e.message));
+  await assert.rejects(router.structured('review',{...request,purpose:'review',requiredCapabilities:['video']}),(e:unknown)=>e instanceof AdapterError&&/does not support video/.test(e.message));
+});
+
+test('an external reviewer retains precedence and the Codex reviewer requires its review route', async () => {
+  const {createConfiguredAdapters,CodexReviewer}=await import('../src/adapters/index.ts');
+  const external=createConfiguredAdapters({codex:{authFile:'/private/auth.json'},reviewer:{executable:process.execPath}} as any,{});
+  assert.ok(external.reviewer);
+  assert.equal(external.reviewer instanceof CodexReviewer,false);
+  const adapters=createConfiguredAdapters({codex:{authFile:'/private/auth.json'}},{});
+  await assert.rejects(adapters.reviewer!.review({artifact:{},version:{},source:{},evidence:{}}),(e:unknown)=>e instanceof AdapterError&&/review has no configured/.test(e.message));
 });
 
 test('an application cancellation interrupts an external worker and is not serialized as input', async () => {
