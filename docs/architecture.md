@@ -1,6 +1,6 @@
 # Harness architecture
 
-Status: implementation specification draft. Confirmed behavior is in [harness-design.md](harness-design.md); this document proposes how to satisfy it. Component interfaces, table names, and state names below are not implemented.
+Status: architectural design implemented by the application-command runtime. The conceptual records below map to SQLite JSON collections in `src/store.ts`; concrete command and state contracts are documented in [usage.md](usage.md). Live adapter compatibility and audiovisual verification remain setup prerequisites.
 
 The scheduler selects approved, unpublished, topic-relevant library items using persisted metadata, preferring older eligible content while enforcing source diversity and avoiding repetition. Build at least 90 days of approved artifacts with assigned times, giving daily shortages and explicit custom requests priority. Continue above the floor while capacity, storage, and configured workload limits allow. When provider quota is unavailable, enforce conservative configured limits and pause on limit errors.
 
@@ -99,4 +99,4 @@ Implementation tests should exercise consequential behavior rather than mirror h
 - UTF-8 CSV round-tripping with multiline Bangla captions, retained terminal rows, atomic refresh, and recovery after export failure.
 - Actual Bangla rendering, source-context preservation, end-to-end artifact delivery, and an explicitly requested test post.
 
-Use real adapter smoke checks only after authentication and test scope are established. Pure workflow tests should use controlled fakes. No tests or integration checks have been run for an implementation because none exists yet.
+Use real adapter smoke checks only after authentication and test scope are established. Pure workflow tests should use controlled fakes. The implementation now has application-boundary and focused adapter tests. Live account and audiovisual checks remain setup prerequisites; see `docs/usage.md` and `docs/integrations.md`.

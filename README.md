@@ -1,20 +1,31 @@
 # Sfurti harness
 
-A planned single-machine Node harness for discovering, producing, reviewing, and scheduling Bangla Facebook content aligned with Sfurti's mission.
+A single-machine Node/TypeScript harness for Bangla content production, independent review, library planning, and Facebook publication through replaceable adapters.
 
-**Current status: design and operating documentation only.** The repository contains the Codex SDK dependency but no implemented harness, workers, database migrations, or runnable harness commands. Nothing in this repository currently generates or publishes content automatically.
+The durable application runtime and controlled adapter tests are implemented. **Live production is not enabled:** external tool installations, authenticated integrations, brand assets, researched posting windows, and a verified end-to-end sample still need operator setup. The supplied configuration deliberately leaves those unset.
 
-## Start here
+## Run locally
 
-- [Published issue spec](.scratch/sfurti-harness/spec.md): 68 user stories, confirmed testing boundary, and implementation scope; status `ready-for-agent`.
-- [Operating guide](docs/usage.md): configuration, setup, daily work, custom requests, and recovery.
-- [Requirements](docs/harness-design.md): consolidated decisions and implementation/setup checks.
-- [Architecture](docs/architecture.md): proposed components and persistence model.
-- [Mission](docs/mission.md) and [glossary](CONTEXT.md): editorial principles and terminology.
-- [Configuration example](config/harness.example.json) and [environment example](.env.example).
+Requires Node 24.12 or later. Uses built-in SQLite (currently experimental in Node).
 
-The initial daily package is three Reels from different source videos, one mission image, and one text post. Counts are configurable; zero disables a type. Production opportunities occur at 06:00, 07:00, and 08:00 Asia/Dhaka. Approved content is scheduled into saved posting windows; additional custom requests do not replace the daily package.
+```sh
+npm ci
+npm run typecheck
+npm test
+npm run sfurti -- help
+npm run sfurti -- config validate
+npm run sfurti -- doctor
+```
 
-Background production continues beyond those morning checks. Maintain at least 90 days of approved content with assigned posting times, and continue beyond that floor when capacity permits. An independent scheduler selects library content and tracks local plans, Facebook-confirmed schedules, and publication. Every upload-queue item is also stored in a filesystem CSV.
+Copy `config/harness.example.json` to `config/harness.json` and `.env.example` to `.env`. Counts are configurable; zero disables a daily type. Do not enable the service until `doctor` reports the setup complete and the live checks in [integration setup](docs/integrations.md) have been performed.
 
-The user has confirmed the product requirements and testing boundary. Engineering skills use the local Markdown tracker and conventions linked from [AGENTS.md](AGENTS.md). See the operating guide's setup checklist for integration details still to supply or verify.
+## Operating boundaries
+
+- `src/app.ts` exports `createHarness(...).execute(command)`, shared by CLI, coordinator and authorized Telegram requests.
+- SQLite owns permissions, immutable artifact versions, review history, segment reservations, jobs, plans and posts. CSV is a retained-history projection with recoverable export status.
+- An independent reviewer receives actual inspected evidence. Each attempt has at most three versions; explicit manual retries preserve a linked failed attempt.
+- Custom requests remain additional work and require explicit scheduling intent. Library size never increases daily posting counts.
+- The planner assigns saved random times to actual approved artifacts, reports per-date shortages over at least 90 days, and can continue farther. Publication reconciles uncertain outcomes before retrying.
+- The coordinator bounds concurrent and daily workload, recovers leases, and prioritizes custom requests and daily shortages over reserve generation.
+
+See [usage](docs/usage.md), [adapter/setup protocol](docs/integrations.md), [architecture](docs/architecture.md), [mission](docs/mission.md), and [glossary](CONTEXT.md). The implementation spec remains in the local tracker at `.scratch/sfurti-harness/spec.md`.

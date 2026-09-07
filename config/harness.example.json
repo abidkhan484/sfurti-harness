@@ -5,13 +5,23 @@
     "videos": 3,
     "images": 1,
     "texts": 1,
-    "productionTimes": ["06:00", "07:00", "08:00"]
+    "productionTimes": [
+      "06:00",
+      "07:00",
+      "08:00"
+    ]
   },
   "audience": {
     "language": "bn",
     "minAge": 3,
     "maxAge": 15,
-    "segments": ["general", "3-5", "6-9", "10-12", "13-15"]
+    "segments": [
+      "general",
+      "3-5",
+      "6-9",
+      "10-12",
+      "13-15"
+    ]
   },
   "video": {
     "format": "reel",
@@ -44,5 +54,17 @@
   },
   "custom": {
     "scheduleByDefault": false
-  }
+  },
+  "limits": {
+    "concurrency": 1,
+    "maxTasksPerTick": 5,
+    "taskTimeoutMs": 120000,
+    "leaseMs": 180000,
+    "backoffMs": 60000,
+    "minFreeBytes": 104857600,
+    "tickMs": 30000,
+    "maxTasksPerDay": 20
+  },
+  "integrations": {},
+  "setup": {}
 }
