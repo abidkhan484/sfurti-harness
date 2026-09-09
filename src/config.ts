@@ -47,28 +47,32 @@ export function loadConfig(input: Partial<Config>|Record<string,unknown> = {}, e
       config.daily[key]=Number(raw);
     }
   }
-  for(const key of ['videos','images','texts'] as const) {
-    if(!Number.isSafeInteger(config.daily[key])||config.daily[key]<0) throw new Error(`daily.${key} must be a nonnegative integer`);
-  }
-  if(config.timezone!=='Asia/Dhaka') throw new Error('timezone must be Asia/Dhaka for this single-context harness');
-  if(typeof config.topic!=='string'||!config.topic.trim()) throw new Error('topic must be nonempty');
-  if(config.audience.language!=='bn'||!Array.isArray(config.audience.segments)||!config.audience.segments.length||config.audience.segments.some(x=>typeof x!=='string'||!x.trim())) throw new Error('Bangla audience and nonempty age segments are required');
-  if(config.audience.minAge!==3||config.audience.maxAge!==15) throw new Error('Audience must preserve the agreed ages 3–15');
-  if(config.review.maxIterations!==3||!config.review.initialRenderCountsAsIteration||!config.review.automaticApproval) throw new Error('Review requires three total versions with automatic approval only after passing');
-  if(config.video.aspectRatio!=='9:16'||config.video.minSeconds<30||config.video.maxSeconds>60||config.video.minSeconds>config.video.maxSeconds) throw new Error('Reels must be vertical and 30–60 seconds');
-  if(config.custom.scheduleByDefault!==false) throw new Error('Custom scheduling requires explicit intent');
-  if (!config.llm || typeof config.llm !== 'object' || Array.isArray(config.llm)) throw new Error('llm must contain taskModels');
-  if ('provider' in (config.llm as Record<string,unknown>)) throw new Error('llm.provider is no longer supported; configure llm.taskModels.<taskType>.provider and .model explicitly');
-  if (!config.llm.taskModels || typeof config.llm.taskModels !== 'object' || Array.isArray(config.llm.taskModels)) throw new Error('llm.taskModels must be an object');
-  for (const [taskType, assignment] of Object.entries(config.llm.taskModels)) {
-    if (!['generation','review'].includes(taskType) || !assignment || typeof assignment !== 'object' || typeof assignment.provider !== 'string' || !assignment.provider.trim() || typeof assignment.model !== 'string' || !assignment.model.trim()) throw new Error(`llm.taskModels.${taskType} requires a nonempty provider and model`);
-  }
-  if(!Number.isSafeInteger(config.reserve.minimumDays)||config.reserve.minimumDays<90||config.reserve.continueAboveMinimum!==true) throw new Error('Planning floor must be at least 90 days and permit continued generation');
-  if(!Array.isArray(config.daily.productionTimes)||config.daily.productionTimes.some(t=>!/^([01]\d|2[0-3]):[0-5]\d$/.test(t))) throw new Error('Invalid daily production time');
-  for(const [key,value] of Object.entries(config.limits)) if(!Number.isSafeInteger(value)||value<=0) throw new Error(`limits.${key} must be a positive integer`);
-  if(config.limits.leaseMs<=config.limits.taskTimeoutMs) throw new Error('Lease must outlive task timeout');
-  if(config.posting.minSpacingMinutes!==null&&(!Number.isFinite(config.posting.minSpacingMinutes)||config.posting.minSpacingMinutes<=0)) throw new Error('Posting spacing must be positive or null until setup');
-  for(const path of [config.storage.databasePath,config.storage.mediaDirectory,config.posting.queueCsvPath,config.posting.windowsFile]) if(typeof path!=='string'||!path) throw new Error('Storage and posting paths must be nonempty');
+  // Collect all constraint violations before throwing so the caller sees every issue at once.
+  const violations:string[]=[];
+  const check=(condition:boolean,message:string)=>{if(condition)violations.push(message);};
+  for(const key of ['videos','images','texts'] as const)
+    check(!Number.isSafeInteger(config.daily[key])||config.daily[key]<0,`daily.${key} must be a nonnegative integer`);
+  check(config.timezone!=='Asia/Dhaka','timezone must be Asia/Dhaka for this single-context harness');
+  check(typeof config.topic!=='string'||!config.topic.trim(),'topic must be nonempty');
+  check(config.audience.language!=='bn'||!Array.isArray(config.audience.segments)||!config.audience.segments.length||config.audience.segments.some(x=>typeof x!=='string'||!x.trim()),'Bangla audience and nonempty age segments are required');
+  check(config.audience.minAge!==3||config.audience.maxAge!==15,'Audience must preserve the agreed ages 3–15');
+  check(config.review.maxIterations!==3||!config.review.initialRenderCountsAsIteration||!config.review.automaticApproval,'Review requires three total versions with automatic approval only after passing');
+  check(config.video.aspectRatio!=='9:16'||config.video.minSeconds<30||config.video.maxSeconds>60||config.video.minSeconds>config.video.maxSeconds,'Reels must be vertical and 30–60 seconds');
+  check(config.custom.scheduleByDefault!==false,'Custom scheduling requires explicit intent');
+  check(!config.llm||typeof config.llm!=='object'||Array.isArray(config.llm),'llm must contain taskModels');
+  check('provider' in (config.llm as Record<string,unknown>),'llm.provider is no longer supported; configure llm.taskModels.<taskType>.provider and .model explicitly');
+  check(!config.llm.taskModels||typeof config.llm.taskModels!=='object'||Array.isArray(config.llm.taskModels),'llm.taskModels must be an object');
+  for(const [taskType,assignment] of Object.entries(config.llm.taskModels??{}))
+    check(!['generation','review'].includes(taskType)||!assignment||typeof assignment!=='object'||typeof (assignment as any).provider!=='string'||!(assignment as any).provider.trim()||typeof (assignment as any).model!=='string'||!(assignment as any).model.trim(),`llm.taskModels.${taskType} requires a nonempty provider and model`);
+  check(!Number.isSafeInteger(config.reserve.minimumDays)||config.reserve.minimumDays<90||config.reserve.continueAboveMinimum!==true,'Planning floor must be at least 90 days and permit continued generation');
+  check(!Array.isArray(config.daily.productionTimes)||config.daily.productionTimes.some(t=>!/^([01]\d|2[0-3]):[0-5]\d$/.test(t)),'Invalid daily production time');
+  for(const [key,value] of Object.entries(config.limits))
+    check(!Number.isSafeInteger(value)||(value as number)<=0,`limits.${key} must be a positive integer`);
+  check(config.limits.leaseMs<=config.limits.taskTimeoutMs,'Lease must outlive task timeout');
+  check(config.posting.minSpacingMinutes!==null&&(!Number.isFinite(config.posting.minSpacingMinutes)||(config.posting.minSpacingMinutes as number)<=0),'Posting spacing must be positive or null until setup');
+  for(const path of [config.storage.databasePath,config.storage.mediaDirectory,config.posting.queueCsvPath,config.posting.windowsFile])
+    check(typeof path!=='string'||!path,'Storage and posting paths must be nonempty');
+  if(violations.length) throw new Error(violations.join('\n'));
   // Paths are project-root relative, matching the documented configuration contract.
   config.storage.databasePath=resolve(config.storage.databasePath);
   config.storage.mediaDirectory=resolve(config.storage.mediaDirectory);
@@ -77,3 +81,4 @@ export function loadConfig(input: Partial<Config>|Record<string,unknown> = {}, e
   if(config.storage.databasePath===config.posting.queueCsvPath||dirname(config.storage.databasePath)===config.storage.databasePath) throw new Error('Database and CSV paths must be distinct files');
   return config;
 }
+
