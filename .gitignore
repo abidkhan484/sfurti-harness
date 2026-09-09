@@ -10,8 +10,14 @@ config/harness.json
 # Generated content, queue exports, and SQLite state
 data/
 
-# Local issue-tracker workspace
-.scratch/
+# Local issue-tracker workspace; preserve the approved research engine docs
+.scratch/*
+!.scratch/research-content-engine/
+.scratch/research-content-engine/*
+!.scratch/research-content-engine/*.md
+!.scratch/research-content-engine/issues/
+.scratch/research-content-engine/issues/*
+!.scratch/research-content-engine/issues/*.md
 
 # Build output, logs, and coverage
 dist/
