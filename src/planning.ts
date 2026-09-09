@@ -88,6 +88,28 @@ function coverage(ctx:Context, command:Command) {
 }
 function makePlans(ctx:Context, command:Command) {
   return ctx.store.transaction(()=>{
+    // Hoist: posting windows and spacing are global config — never change per date.
+    const cachedWins=windows(ctx.config);
+    const cachedSpacingMs=(ctx.config.posting.minSpacingMinutes??0)*60000;
+    function cachedSlots(slotCtx:Context, config:Config, date:string, count:number, existing:Post[], earliest=slotCtx.now().getTime()):string[] {
+      if(!count) return [];
+      const available=cachedWins.map(m=>Date.parse(dateAt(date,m))).filter(t=>t>earliest&&existing.every(p=>Math.abs(t-Date.parse(p.scheduledAt))>=cachedSpacingMs));
+      const chosen:number[]=[];
+      let candidates=available;
+      while(chosen.length<count) {
+        const needed=count-chosen.length,capacity:number[]=Array(candidates.length).fill(1);
+        for(let i=candidates.length-1;i>=0;i--) {
+          let low=i+1,high=candidates.length;
+          while(low<high){const mid=Math.floor((low+high)/2);if(candidates[mid]-candidates[i]<cachedSpacingMs)low=mid+1;else high=mid;}
+          capacity[i]=1+(capacity[low]??0);
+        }
+        const viable=candidates.filter((_,i)=>capacity[i]>=needed);
+        if(!viable.length) throw new Error(`Posting window/spacing conflict on ${date}: cannot fit ${count} posts`);
+        const t=viable[Math.min(viable.length-1,Math.max(0,Math.floor(slotCtx.random()*viable.length)))];
+        chosen.push(t);candidates=candidates.filter(v=>v-t>=cachedSpacingMs);
+      }
+      return chosen.map(t=>new Date(t).toISOString());
+    }
     for(const date of range(ctx,command)) {
       const old=ctx.store.get<any>('plans',date);
       const config=old?.config??publicConfig(ctx.config);
@@ -99,7 +121,7 @@ function makePlans(ctx:Context, command:Command) {
       for(const p of dayPosts) for(const s of ctx.store.get<any>('artifacts',p.artifactId)?.sourceIds??[]) sources.add(s);
       const expected=quota(config), selected:any[]=[];
       // Configuration capacity is independent of how many approved artifacts exist.
-      slots({...ctx,random:()=>0},config,date,kinds.reduce((sum,k)=>sum+expected[k],0),[],-Infinity);
+      cachedSlots({...ctx,random:()=>0},config,date,kinds.reduce((sum,k)=>sum+expected[k],0),[],-Infinity);
       const library=ctx.store.all<any>('artifacts').filter(a=>eligible(ctx,a,dateAt(date,1439))&&a.origin!=='custom'&&a.topic===config.topic&&!allocated.has(a.id)).sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
       for(const kind of kinds) {
         let remaining=Math.max(0,expected[kind]-dayPosts.filter(p=>p.kind===kind).length);
@@ -112,7 +134,7 @@ function makePlans(ctx:Context, command:Command) {
       }
       let times:string[]=[];
       while(selected.length) {
-        try {times=slots(ctx,config,date,selected.length,posts.filter(active));break;}
+        try {times=cachedSlots(ctx,config,date,selected.length,posts.filter(active));break;}
         catch(error) {if(date!==today(ctx)) throw error; selected.pop();}
       }
       selected.forEach((a,i)=>ctx.store.put('posts',{id:ctx.id(),artifactId:a.id,kind:a.kind,origin:a.origin,date,scheduledAt:times[i],status:'planned'}));
