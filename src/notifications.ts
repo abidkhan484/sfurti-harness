@@ -2,8 +2,18 @@ import { createHash } from 'node:crypto';
 import type { Context } from './types.ts';
 import { today } from './types.ts';
 
+/** Summary-style events deduplicate per day; transient error events deduplicate per minute. */
+function isDailyDeduped(event: unknown): boolean {
+  if (typeof event !== 'object' || event === null) return false;
+  const type = (event as Record<string, unknown>).type;
+  return type === 'reserve-summary' || type === 'daily-selected' || type === 'command-result';
+}
+
 export async function enqueueNotification(ctx:Context,event:unknown) {
-  const id=createHash('sha256').update(`${today(ctx)}:${JSON.stringify(event)}`).digest('hex');
+  const scope = isDailyDeduped(event)
+    ? today(ctx)
+    : new Intl.DateTimeFormat('en-CA',{timeZone:ctx.config.timezone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(ctx.now());
+  const id=createHash('sha256').update(`${scope}:${JSON.stringify(event)}`).digest('hex');
   ctx.store.transaction(()=>{
     if(!ctx.store.get('notifications',id)) ctx.store.put('notifications',{id,event,status:'pending',createdAt:ctx.now().toISOString(),attempts:0});
   });
