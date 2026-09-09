@@ -219,6 +219,12 @@ export async function production(ctx: Context, command: Command): Promise<unknow
     store.put('artifacts',artifact);
   });
   if (acquired) return acquired;
+  return produceArtifact(ctx, artifact, command, source, owner);
+}
+
+/** Runs the render-and-review loop for one artifact. Caller has already acquired the lease. */
+async function produceArtifact(ctx: Context, artifact: Artifact, command: Command, source: RecordData|undefined, owner: string): Promise<Artifact> {
+  const store = ctx.store;
   const bounded = async (operation: (signal: AbortSignal) => Promise<any>) => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -292,3 +298,4 @@ export async function production(ctx: Context, command: Command): Promise<unknow
   if (artifact.origin !== 'reserve' || artifact.status === 'failed') await ctx.notify({type:artifact.status === 'approved' ? 'artifact-ready':'artifact-failed',artifactId:artifact.id,origin:artifact.origin,filePath:artifact.filePath,error:artifact.lastError});
   return artifact;
 }
+
