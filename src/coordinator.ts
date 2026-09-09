@@ -33,18 +33,20 @@ export async function tick(ctx:Context, command:Command, execute:Execute) {
     return true;
   });
   if(!acquired) return {status:'busy',produced:0};
+  let heartbeatFailed=false;
   const renew=()=>ctx.store.transaction(()=>{
     const job=ctx.store.get('jobs',id);
     if(job?.owner!==owner) throw new Error('Coordinator ownership lost');
     ctx.store.put('jobs',{...job,leaseUntil:new Date(ctx.now().getTime()+ctx.config.limits.leaseMs).toISOString()});
   });
-  const heartbeat=setInterval(()=>{try{renew();}catch{/* Fenced at next handoff. */}},Math.max(100,Math.floor(ctx.config.limits.leaseMs/3)));
+  const heartbeat=setInterval(()=>{try{renew();}catch{heartbeatFailed=true;/* Ownership loss detected; fenced at next explicit guardedRenew(). */}},Math.max(100,Math.floor(ctx.config.limits.leaseMs/3)));
+  const guardedRenew=()=>{if(heartbeatFailed)throw new Error('Coordinator ownership lost (heartbeat failed)');renew();};
   let produced=0, attempted=0;
   const failures:string[]=[];
   try {
     const pending=ctx.store.all('jobs').filter(j=>j.origin==='custom'&&['pending','running'].includes(j.status));
     for(const job of pending) {
-      renew();
+      guardedRenew();
       const results=[];
       for(const kind of Object.keys(kinds) as Array<keyof typeof kinds>) {
         for(let index=0;index<job.counts[kind];index++) {
@@ -58,10 +60,12 @@ export async function tick(ctx:Context, command:Command, execute:Execute) {
           }
         }
       }
-      const artifacts=ctx.store.all('artifacts').filter(a=>typeof a.requestId==='string'&&a.requestId.startsWith(`${job.id}:`));
-      const expected=Object.values(job.counts as Record<string,number>).reduce((a,b)=>a+b,0);
-      const complete=artifacts.length===expected&&artifacts.every(a=>['approved','failed'].includes(a.status));
-      ctx.store.put('jobs',{...job,status:complete?'complete':'pending',artifactIds:artifacts.map(a=>a.id)});
+      ctx.store.transaction(()=>{
+        const artifacts=ctx.store.all('artifacts').filter(a=>typeof a.requestId==='string'&&a.requestId.startsWith(`${job.id}:`));
+        const expected=Object.values(job.counts as Record<string,number>).reduce((a,b)=>a+b,0);
+        const complete=artifacts.length===expected&&artifacts.every(a=>['approved','failed'].includes(a.status));
+        ctx.store.put('jobs',{...job,status:complete?'complete':'pending',artifactIds:artifacts.map(a=>a.id)});
+      });
     }
     if(command.customOnly) return {status:'complete',produced,attempted,failures};
     const date=today(ctx);
@@ -79,6 +83,11 @@ export async function tick(ctx:Context, command:Command, execute:Execute) {
     const enabled=ctx.config.daily.videos+ctx.config.daily.images+ctx.config.daily.texts>0;
     const days=enabled&&coverage.completeDays>=ctx.config.reserve.minimumDays ? Math.min(3650,Math.max(ctx.config.reserve.minimumDays+1,ctx.store.all('plans').filter(p=>p.date>=today(ctx)).length+1)):ctx.config.reserve.minimumDays;
     if(days>coverage.days.length) coverage=await execute({type:'plan',days});
+    // Pre-load read-only snapshots; refresh after each production write to see new data.
+    let allArtifacts:any[]=ctx.store.all('artifacts');
+    let allSources:any[]=ctx.store.all('sources');
+    let allSegments:any[]=ctx.store.all('segments');
+    const refreshSnapshots=()=>{allArtifacts=ctx.store.all('artifacts');allSources=ctx.store.all('sources');allSegments=ctx.store.all('segments');};
     let discoveryAttempted=false;
     for(const day of coverage.days) {
       if(attempted>=ctx.config.limits.maxTasksPerTick) break;
@@ -86,29 +95,31 @@ export async function tick(ctx:Context, command:Command, execute:Execute) {
       if(isToday&&!dailyDue)continue;
       const effective=isToday?snapshot!.config:ctx.config;
       for(const kind of Object.keys(kinds) as Array<keyof typeof kinds>) {
-        const accepted=ctx.store.all('artifacts').filter(a=>a.date===day.date&&a.kind===kind&&a.topic===effective.topic&&a.status==='approved'&&a.origin!=='custom').length;
+        const accepted=allArtifacts.filter(a=>a.date===day.date&&a.kind===kind&&a.topic===effective.topic&&a.status==='approved'&&a.origin!=='custom').length;
         for(let slot=0;slot<(day.missing?.[kind]??0);slot++) {
           if(attempted>=ctx.config.limits.maxTasksPerTick) break;
-          renew();
+          guardedRenew();
           const requestId=`daily:${day.date}:${kind}:${accepted+slot}:${effective.topic}`;
-          const existing=ctx.store.all('artifacts').find(a=>a.requestId===requestId);
+          const existing=allArtifacts.find(a=>a.requestId===requestId);
           if(existing?.status==='failed') continue; // Explicit retry owns exhausted candidates.
           let source:any;
           if(kind==='video'&&!existing) {
-            const eligible=()=>ctx.store.all('sources').find(s=>s.status==='cleared'&&s.metadata?.qualified===true&&
+            const eligible=()=>allSources.find(s=>s.status==='cleared'&&s.metadata?.qualified===true&&
               (s.metadata.topic===effective.topic||s.metadata.topics?.includes(effective.topic))&&s.metadata.segments?.length&&
-              !ctx.store.all('artifacts').some(a=>a.date===day.date&&a.status!=='failed'&&a.sourceIds?.includes(s.id))&&
-              !ctx.store.all('segments').some(segment=>segment.sourceId===s.id&&s.metadata.segments.some((s:any)=>s.startMs<segment.endMs&&segment.startMs<s.endMs)));
+              !allArtifacts.some(a=>a.date===day.date&&a.status!=='failed'&&a.sourceIds?.includes(s.id))&&
+              !allSegments.some(segment=>segment.sourceId===s.id&&s.metadata.segments.some((s:any)=>s.startMs<segment.endMs&&segment.startMs<s.endMs)));
             source=eligible();
             if(!source&&!discoveryAttempted&&ctx.adapters.discovery) {
               discoveryAttempted=true;attempted++;
               await production(ctx,{type:'discover',topic:effective.topic});
+              refreshSnapshots();
               source=eligible();
             }
             if(!source) {failures.push(`${day.date}: no qualified cleared video source`);break;}
           }
           attempted++;
           const artifact:any=await production({...ctx,config:effective},{type:'produce',kind,origin:isToday?'daily':'reserve',date:day.date,topic:effective.topic,requestId,sourceId:existing?.sourceIds[0]??source?.id,segments:existing?.segments??source?.metadata.segments});
+          refreshSnapshots();
           if(artifact.status==='approved') produced++;
           if(artifact.status==='deferred') return {status:'deferred',produced,attempted,reason:artifact.reason};
           if(artifact.status==='failed') failures.push(`${artifact.id}: ${artifact.lastError}`);

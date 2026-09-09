@@ -24,6 +24,81 @@ The main Node process owns the workflow, limits, dependencies, and durable state
 
 Pass identifiers and structured results between stages, rather than copying large media files through LLM messages. Validate task output before committing it or enqueueing a dependent task. Store failures as explicit results, not empty successful payloads.
 
+### Component communication flow
+
+```mermaid
+flowchart TD
+    subgraph Triggers["Triggers & Control"]
+        Operator["Operator (Telegram / CLI)"]
+        Hermes["Hermes Adapter"]
+        DailyCron["Daily Schedule Triggers (06:00, 07:00, 08:00)"]
+    end
+
+    subgraph Core["Main Node Process (Orchestration & State)"]
+        App["App / Command Dispatcher"]
+        Coordinator["Coordinator (Leases, Snapshots, Job Queue)"]
+        Store[("SQLite Store & Upload Queue CSV")]
+        MediaDir[("Media Directory (data/media)")]
+        Scheduler["Scheduling Tool (Posting Windows)"]
+    end
+
+    subgraph Production["Production & Content Workers"]
+        Discovery["Discovery Worker (YouTube Search & Keywords)"]
+        Qualification["Source Qualification (Permission & Segments)"]
+        Editor["Content Workers (Video / Image / Text Editor)"]
+        MediaInspect["Media Inspector (Frames, Audio, Transcript)"]
+    end
+
+    subgraph LLM_Review["LLM & Review Subsystem"]
+        ReviewWorker["Review Worker (CodexReviewer)"]
+        LLMStrategy["LLM Strategy Adapter (CodexStrategy)"]
+        CodexSDK["OpenAI Codex SDK (@openai/codex-sdk)"]
+        LLMProvider["LLM Provider (OpenAI / Codex Model)"]
+    end
+
+    subgraph External["External Adapters & Platforms"]
+        FBAdapter["Facebook Adapter (ProcessFacebook)"]
+        MetaAPI["Facebook / Meta Graph API"]
+        TelegramTransport["Telegram Delivery Adapter"]
+    end
+
+    %% Ingestion & Commands
+    Operator --> App
+    Hermes --> App
+    DailyCron --> App
+    App --> Coordinator
+    Coordinator <--> Store
+
+    %% Production flow
+    Coordinator --> Discovery
+    Discovery --> Store
+    Coordinator --> Qualification
+    Qualification --> Store
+    Coordinator --> Editor
+    Editor --> MediaDir
+    Editor --> MediaInspect
+    MediaInspect --> MediaDir
+    MediaInspect --> ReviewWorker
+
+    %% LLM Review Flow
+    ReviewWorker -->|"Structured Request (Prompt + Extracted Frames)"| LLMStrategy
+    LLMStrategy -->|"Sandboxed Thread Execution"| CodexSDK
+    CodexSDK -->|"LLM API Call"| LLMProvider
+    LLMProvider -->|"Structured JSON Verdict"| CodexSDK
+    CodexSDK --> LLMStrategy
+    LLMStrategy -->|"Validated Review & Usage"| ReviewWorker
+    ReviewWorker -->|"Approval / Correction Findings"| Coordinator
+
+    %% Scheduling & Publishing
+    Coordinator --> Scheduler
+    Scheduler <--> Store
+    Scheduler --> FBAdapter
+    FBAdapter <--> MetaAPI
+    Coordinator --> TelegramTransport
+    TelegramTransport --> Operator
+```
+
+
 ## Replaceable LLM strategy
 
 The application contract should accept a task purpose, mission version, input/evidence references, an output schema, and cancellation/limits. It should return a validated decision or a classified error, plus provider/model metadata and available usage details. Expose capabilities so an adapter cannot silently discard required evidence.

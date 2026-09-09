@@ -10,7 +10,9 @@ export interface FileIntegrity {bytes:number;sha256:string}
 /** Registration may establish integrity; publication must compare against stored integrity. */
 export function fileIntegrity(path:unknown, expected?:unknown, requireStoredIntegrity=false):FileIntegrity {
   if (requireStoredIntegrity && (!record(expected) || !nonempty(expected.sha256))) throw new Error('Missing artifact integrity');
-  if (typeof path !== 'string' || !statSync(path).isFile() || !statSync(path).size) throw new Error('A nonempty artifact or evidence file is required');
+  if (typeof path !== 'string') throw new Error('A nonempty artifact or evidence file is required');
+  const stat = statSync(path);
+  if (!stat.isFile() || !stat.size) throw new Error('A nonempty artifact or evidence file is required');
   const bytes=readFileSync(path);
   const result={bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')};
   if (expected !== undefined && (!record(expected) || expected.sha256 !== result.sha256)) throw new Error('Registered file integrity changed');

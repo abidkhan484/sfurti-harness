@@ -29,7 +29,7 @@ try {
   const env={...process.env};
   if(!env.SFURTI_CONFIG&&existsSync('./config/harness.json')) env.SFURTI_CONFIG='./config/harness.json';
   const config=loadConfig({},env);
-  const adapters=createConfiguredAdapters(config.integrations);
+  const adapters=createConfiguredAdapters(config.integrations, config.llm);
   const app=createHarness({config,env:{},adapters});
   let closed=false;
   const close=()=>{if(!closed){closed=true;app.close();}};
