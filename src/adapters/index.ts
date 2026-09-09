@@ -48,6 +48,17 @@ export class ProcessFacebook {
 }
 function validDate(value:unknown) { return value === undefined || (typeof value === 'string' && Number.isFinite(Date.parse(value))); }
 
+function extractArtifactPaths(event: unknown): string[] | undefined {
+  if (!isRecord(event)) return undefined;
+  if (typeof event.filePath === 'string') return [event.filePath];
+  if (isRecord(event.result) && typeof event.result.filePath === 'string') return [event.result.filePath];
+  if (Array.isArray(event.posts)) {
+    const paths = event.posts.filter(isRecord).map(p => p.filePath).filter((p): p is string => typeof p === 'string');
+    return paths.length ? paths : undefined;
+  }
+  return undefined;
+}
+
 /** Adapters are enabled only by explicit config. No credentials, installations, or calls are implicit. */
 export function createConfiguredAdapters(integrations:Record<string,unknown> = {}, llmConfig: {taskModels?:TaskModelAssignments} = {}) {
   const processFor = (name:string) => integrations[name] === undefined ? undefined : new ProcessAdapter(integrations[name] as ProcessConfig);
@@ -65,6 +76,6 @@ export function createConfiguredAdapters(integrations:Record<string,unknown> = {
     discovery:discovery ? {discover:async(input:unknown)=>checked(await discovery.call('discovery.discover',input),(v):v is {keywords:Data[];sources:Data[];matches:Data[]}=>isRecord(v) && Array.isArray(v.keywords) && v.keywords.every(k=>isRecord(k) && nonempty(k.query) && nonempty(k.language) && nonempty(k.intent)) && Array.isArray(v.sources) && v.sources.every(s=>isRecord(s) && nonempty(s.id) && nonempty(s.title)) && Array.isArray(v.matches) && v.matches.every(m=>isRecord(m) && nonempty(m.keywordId) && nonempty(m.sourceId)),'discovery.discover')} : undefined,
     reviewer:reviewer ? {review:async(input:unknown)=>checked(await reviewer.call('reviewer.review',input),validReview,'reviewer.review')} : llm ? new CodexReviewer(llm) : undefined,
     facebook:integrations.facebook === undefined ? undefined : new ProcessFacebook(integrations.facebook as ProcessConfig),
-    delivery:telegram?.transport ? {send:async(event:unknown,delivery?:{idempotencyKey?:string;signal?:AbortSignal})=>{ await telegram.transport!.call('telegram.deliver',{chatId:telegram.operatorUserId,idempotencyKey:delivery?.idempotencyKey,signal:delivery?.signal,text:JSON.stringify(event),artifactPaths:isRecord(event) && typeof event.filePath === 'string' ? [event.filePath] : isRecord(event) && Array.isArray(event.posts) ? event.posts.filter(isRecord).map(p=>p.filePath).filter((p):p is string=>typeof p==='string') : isRecord(event) && isRecord(event.result) && typeof event.result.filePath==='string' ? [event.result.filePath] : undefined}); }} : undefined,
+    delivery:telegram?.transport ? {send:async(event:unknown,delivery?:{idempotencyKey?:string;signal?:AbortSignal})=>{ await telegram.transport!.call('telegram.deliver',{chatId:telegram.operatorUserId,idempotencyKey:delivery?.idempotencyKey,signal:delivery?.signal,text:JSON.stringify(event),artifactPaths:extractArtifactPaths(event)}); }} : undefined,
   };
 }
