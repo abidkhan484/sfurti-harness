@@ -5,7 +5,14 @@ The harness implements adapter contracts and a Codex SDK strategy. It has **not*
 Configure `integrations` in the harness JSON configuration. The keys `editor`, `media`, `discovery`, `reviewer`, `facebook`, and `hermes` each accept:
 
 ```json
-{"executable":"/absolute/path/to/wrapper","args":[],"cwd":"/absolute/path/to/dependency","env":{},"timeoutMs":120000,"maxOutputBytes":1048576}
+{
+  "executable": "/absolute/path/to/wrapper",
+  "args": [],
+  "cwd": "/absolute/path/to/dependency",
+  "env": {},
+  "timeoutMs": 120000,
+  "maxOutputBytes": 1048576
+}
 ```
 
 Each wrapper must implement the protocol below. Commands use an argument array, never a shell. Only PATH, LANG and explicitly configured environment values reach the process. Keep secrets in a private local configuration or wrapper-managed credential file, never in tracked configuration, CSV, arguments or logs. A wrapper must not launch detached background workers; the harness terminates the process group on timeout, excess output and completion on Linux. The aggregate stdout/stderr limit is enforced; raw stderr is intentionally excluded from application errors. Windows requires an external process supervisor for descendant containment.
@@ -15,30 +22,34 @@ Each wrapper must implement the protocol below. Commands use an argument array, 
 The wrapper reads one UTF-8 JSON line from stdin, performs one operation, and writes exactly one JSON response to stdout before exiting zero. Diagnostics go to stderr. A wrapper must enforce its own schema validation and allow only known operations.
 
 ```json
-{"protocol":"sfurti/1","operation":"editor.create","payload":{}}
+{ "protocol": "sfurti/1", "operation": "editor.create", "payload": {} }
 ```
 
 ```json
-{"protocol":"sfurti/1","ok":true,"result":{}}
+{ "protocol": "sfurti/1", "ok": true, "result": {} }
 ```
 
 ```json
-{"protocol":"sfurti/1","ok":false,"error":{"kind":"rate_limit","uncertain":false,"retryAfterMs":60000}}
+{
+  "protocol": "sfurti/1",
+  "ok": false,
+  "error": { "kind": "rate_limit", "uncertain": false, "retryAfterMs": 60000 }
+}
 ```
 
 Accepted external error kinds are `rate_limit`, `authentication`, `rejected`, and `transient`. Timeouts, nonzero exits and malformed replies have uncertain side effects. A caller must reconcile external publication before resubmitting. Never return an empty success for failed work.
 
-| Operation | Input and required output |
-| --- | --- |
-| `discovery.discover` | Topic, mission and Bangla-first language. Returns `keywords` with stable `id`, `query`, `language`, `intent`; `sources` with `id`, `title` and source metadata; `matches` with `keywordId`, `sourceId`. Discovery does not grant permission. |
-| `editor.create` | Artifact, exact source segments, authorized source, mission, version number, prior corrective findings, output directory and stable `idempotencyKey`. Returns nonempty `filePath`, `caption`, and original `segments` for video. Same key must retrieve the original render after timeout. |
-| `media.inspect` | Actual file path, kind and source segments. Returns `valid`, technical measurements, and `evidence`: frame file paths, transcript, independent audio intelligibility/coverage, overall coverage and limitations. Never claim native audiovisual inspection from a transcript alone. |
-| `reviewer.review` | Actual artifact version and independently collected evidence. Returns `passed`, boolean `criteria` for mission/claims/context/age/bangla/usability, and `findings` with version, location, criterion, evidence, correction, acceptanceCondition. A fresh review context must not inherit producer history. |
-| `facebook.bounds` | Current ISO timestamp `now`. Returns verified `minLeadMinutes` and `maxLeadDays` for the configured Page/API/content capabilities. |
-| `facebook.submit` | Stable queue `id`, approved `artifact`, and `scheduledAt`. Returns `remoteId` and `status` scheduled/published; optionally `publishedAt`. Persist the stable key-to-remote-ID mapping before responding. |
-| `facebook.reconcile` | Saved post including correlation ID and remote ID if known. Returns status absent/unknown/scheduled/published/cancelled, with remote ID for scheduled/published. `absent` means authoritative absence across all attempts; inability to search by correlation ID means `unknown`, never absent. |
-| `facebook.cancel` | Saved post. Returns cancelled only after remote confirmation, otherwise unknown. |
-| `telegram.deliver` | Configured private operator `chatId`, text, optional artifact paths. Wrapper sends only to that operator; records delivery failures and retries independently. |
+| Operation            | Input and required output                                                                                                                                                                                                                                                                                  |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `discovery.discover` | Topic, mission and Bangla-first language. Returns `keywords` with stable `id`, `query`, `language`, `intent`; `sources` with `id`, `title` and source metadata; `matches` with `keywordId`, `sourceId`. Discovery does not grant permission.                                                               |
+| `editor.create`      | Artifact, exact source segments, authorized source, mission, version number, prior corrective findings, output directory and stable `idempotencyKey`. Returns nonempty `filePath`, `caption`, and original `segments` for video. Same key must retrieve the original render after timeout.                 |
+| `media.inspect`      | Actual file path, kind and source segments. Returns `valid`, technical measurements, and `evidence`: frame file paths, transcript, independent audio intelligibility/coverage, overall coverage and limitations. Never claim native audiovisual inspection from a transcript alone.                        |
+| `reviewer.review`    | Actual artifact version and independently collected evidence. Returns `passed`, boolean `criteria` for mission/claims/context/age/bangla/usability, and `findings` with version, location, criterion, evidence, correction, acceptanceCondition. A fresh review context must not inherit producer history. |
+| `facebook.bounds`    | Current ISO timestamp `now`. Returns verified `minLeadMinutes` and `maxLeadDays` for the configured Page/API/content capabilities.                                                                                                                                                                         |
+| `facebook.submit`    | Stable queue `id`, approved `artifact`, and `scheduledAt`. Returns `remoteId` and `status` scheduled/published; optionally `publishedAt`. Persist the stable key-to-remote-ID mapping before responding.                                                                                                   |
+| `facebook.reconcile` | Saved post including correlation ID and remote ID if known. Returns status absent/unknown/scheduled/published/cancelled, with remote ID for scheduled/published. `absent` means authoritative absence across all attempts; inability to search by correlation ID means `unknown`, never absent.            |
+| `facebook.cancel`    | Saved post. Returns cancelled only after remote confirmation, otherwise unknown.                                                                                                                                                                                                                           |
+| `telegram.deliver`   | Configured private operator `chatId`, text, optional artifact paths. Wrapper sends only to that operator; records delivery failures and retries independently.                                                                                                                                             |
 
 The generic Hermes adapter exposes `.call(operation,payload)` for a verified external bridge. Incoming operator commands use `TelegramOperator.dispatch(update)` and the same `app.execute` as the CLI. The dispatcher accepts only a private chat where sender and chat IDs both match the configured operator, requires an integer Telegram update ID, and attaches `commandId: telegram:<update_id>` for persistent application deduplication. This is an application boundary, not an implemented webhook or polling daemon. The bridge must verify Telegram transport authenticity and feed raw updates to this dispatcher; it must not execute arbitrary shell text.
 

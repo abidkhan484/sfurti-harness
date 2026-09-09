@@ -3,8 +3,16 @@
     "@openai/codex-sdk": "^0.153.2"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^26.4.1",
-    "typescript": "^7.0.2"
+    "eslint": "^10.10.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.12.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.5.0",
+    "prettier": "^3.9.6",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.70.0"
   },
   "name": "sfurti-harness",
   "version": "0.1.0",
@@ -14,8 +22,12 @@
     "node": ">=24.12.0"
   },
   "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "sfurti": "node --env-file-if-exists=.env src/cli.ts"
+    "sfurti": "node --env-file-if-exists=.env src/cli.ts",
+    "prepare": "husky"
   }
 }
