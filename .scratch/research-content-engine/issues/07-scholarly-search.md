@@ -55,3 +55,6 @@ Append exact changed files, tests run/results, any unverified external prerequis
 ## Comments
 
 - Created 2026-09-09. No implementation performed as part of specification authoring.
+- Implemented 2026-09-10: added the injected-transport Europe PMC adapter in `src/adapters/search/europe-pmc.ts`, synthetic cursor/access/provenance tests in `test/search-europe-pmc.test.ts`, and a verified REST mapping/operator check in `docs/integrations/research-providers.md`.
+- Checks: 4 focused tests, `npm run typecheck`, quiet lint, and `git diff --check` passed. No live request was made.
+- Deviations: none. External prerequisite: record the configured endpoint, API behavior, and rate-limit check before activation.

@@ -55,3 +55,6 @@ Append exact changed files, tests run/results, any unverified external prerequis
 ## Comments
 
 - Created 2026-09-09. No implementation performed as part of specification authoring.
+- Implemented 2026-09-10: added public URL/SSRF policy, bounded streaming HTTP collection with conditional checkpoints and atomic hash snapshots, and fixture tests in `src/research/url-policy.ts`, `src/adapters/collection/http.ts`, and `test/research-fetch.test.ts`.
+- Checks: focused fetch test, `npm run typecheck`, lint with no errors, and `git diff --check` passed. No network call was made.
+- Deviations: durable checkpoint persistence is intentionally deferred to the later shared command/service integration ticket; collector returns typed checkpoint data without performing async work inside a store transaction. External prerequisites: none for offline behavior.

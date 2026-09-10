@@ -54,3 +54,6 @@ Append exact changed files, tests run/results, any unverified external prerequis
 ## Comments
 
 - Created 2026-09-09. No implementation performed as part of specification authoring.
+- Implemented 2026-09-10: added deterministic persisted planning and resume execution in `src/research/query-planning.ts`, plus four fixture tests in `test/research-query-planning.test.ts`. It covers empty-registry five-bucket fallback, configured languages, neutral/counter-evidence minimums, C8 allocation/borrowing, language/provider-aware deduplication, stable IDs, and no replanning during execution.
+- Checks: focused test, `npm run typecheck`, lint with no errors, Prettier for changed files, and `git diff --check` passed.
+- Deviations: the C4 rationale is represented by a local planning-query type because persisted C2 `SearchQuery` deliberately omits it; the planner keeps it before mapping to the durable record. External prerequisites: none.

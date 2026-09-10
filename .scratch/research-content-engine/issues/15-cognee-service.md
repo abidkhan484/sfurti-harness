@@ -1,7 +1,7 @@
 # 15 — Package a pinned Cognee service and typed HTTP adapter
 
 Status: ready-for-agent
-Implementation: not started
+Implementation: complete for offline versioned HTTP mapping; release-specific pin pending operator verification
 Dependencies: [01](01-research-contracts.md), [03](03-research-configuration.md)
 Execution gate: dependencies must be implemented and their acceptance checks passing.
 Spec references: S6, C5, C10
@@ -57,3 +57,21 @@ Append exact changed files, tests run/results, any unverified external prerequis
 ## Comments
 
 - Created 2026-09-09. No implementation performed as part of specification authoring.
+- Implemented 2026-09-10. Changed `src/adapters/memory/cognee.ts`,
+  `test/cognee-service.test.ts`, and `docs/integrations/research-providers.md`.
+  The adapter supplies a typed, bounded `Memory` boundary; routes only the four
+  approved datasets; requires entity-version/content-hash/schema provenance;
+  excludes unresolvable search hits; preserves pending/ready/failed job status;
+  and fails closed on health version/capability incompatibility. Its token is
+  never included in adapter errors.
+- Checks: `node --test test/cognee-service.test.ts` passed (all fixture cases);
+  focused ESLint, subsequent `npm run typecheck`, and `git diff --check`
+  passed.
+- Deviation/external prerequisite: no immutable Cognee HTTP release, API schema,
+  auth-header convention, or image digest was verified offline. Per the setup
+  runbook, no floating `main` image or invented provider fields were pinned.
+  The current implementation requires a reviewed `CogneeProtocol` constructed
+  from an operator-provided tag, commit/digest, capability health response, and
+  redacted upsert/status/search/remove fixtures. Replacing the synthetic
+  fixture mapping with that release-specific protocol remains required for
+  locally tested or live-ready status.

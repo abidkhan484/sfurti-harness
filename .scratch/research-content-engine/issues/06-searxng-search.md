@@ -55,3 +55,6 @@ Append exact changed files, tests run/results, any unverified external prerequis
 ## Comments
 
 - Created 2026-09-09. No implementation performed as part of specification authoring.
+- Implemented 2026-09-10: added injected-transport SearXNG JSON search in `src/adapters/search/searxng.ts`, deterministic fixtures in `test/search-searxng.test.ts`, and the verified API mapping/check procedure in `docs/integrations/research-providers.md`.
+- Checks: focused SearXNG test and `npm run typecheck` passed; lint had no errors and only the existing warning baseline; `git diff --check` passed. No live request was made.
+- Deviations: none. External prerequisite: an operator-controlled SearXNG instance with JSON output enabled and its version/settings recorded before activation.

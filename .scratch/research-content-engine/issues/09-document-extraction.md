@@ -56,3 +56,6 @@ Append exact changed files, tests run/results, any unverified external prerequis
 ## Comments
 
 - Created 2026-09-09. No implementation performed as part of specification authoring.
+- Implemented 2026-09-10: added conservative HTML/PDF/feed extraction and stable UTF-16 locators in `src/research/extraction.ts` and `src/adapters/collection/extract.ts`, plus synthetic Bangla/English/Spanish, malicious-page, feed, readable-PDF, and scanned-PDF fixtures with `test/research-extraction.test.ts`.
+- Checks: focused extraction test, `npm run typecheck`, lint with no errors, and `git diff --check` passed.
+- Deviation: no maintained HTML/PDF parser dependency was added. The built-in implementation marks unsupported/scanned PDFs and incomplete feeds partial rather than inventing full-text access. External prerequisite: none for offline fixture behavior.

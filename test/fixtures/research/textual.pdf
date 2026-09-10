@@ -1,0 +1,10 @@
+%PDF-1.4
+1 0 obj << /Type /Page /Contents 2 0 R >> endobj
+2 0 obj << /Length 52 >> stream
+BT (SYNTHETIC TEST DATA: Page one evidence.) Tj ET
+endstream endobj
+3 0 obj << /Type /Page /Contents 4 0 R >> endobj
+4 0 obj << /Length 52 >> stream
+BT (Page two keeps its locator.) Tj ET
+endstream endobj
+%%EOF
