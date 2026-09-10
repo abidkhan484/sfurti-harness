@@ -58,3 +58,6 @@ Append exact changed files, tests run/results, any unverified external prerequis
 ## Comments
 
 - Created 2026-09-09. No implementation performed as part of specification authoring.
+- Implemented 2026-09-10: added `search` and `topic-validation` task routes, fresh-request isolation metadata, and bounded data-only C4 wrappers in `src/research/agents.ts`; updated the Codex role-purpose contract and added deterministic role/isolation/injection/quota tests in `test/research-agents.test.ts`.
+- Checks: focused agent test passed; `npm run typecheck` passed; changed-file lint passed with repository baseline warnings only; `git diff --check` passed. No live provider was invoked.
+- Deviations: provider JSON schema remains permissive only at transport level for compatibility; strict root-field allowlists and operation parsers remain the authoritative rejection gate. External prerequisites: configured role models and credentials are required only for live execution.

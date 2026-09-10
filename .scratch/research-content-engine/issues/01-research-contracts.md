@@ -55,3 +55,6 @@ Append exact changed files, tests run/results, any unverified external prerequis
 ## Comments
 
 - Created 2026-09-09. No implementation performed as part of specification authoring.
+- Implemented 2026-09-10: added `src/research/contracts.ts`, `src/research/schemas.ts`, and `test/research-contracts.test.ts`. The contracts define the C2 ledger records and draft agent boundaries; parsers enforce envelope, UTC date, revision, locator, enum, array-bound, and app-owned approval/audit invariants without echoing source content.
+- Checks: `node --test --test-reporter spec test/research-contracts.test.ts` passed (3 assertions); `npm run typecheck` passed; `npm run lint` completed with the existing 127 warnings and no errors; `git diff --check` passed.
+- Deviations: none. External prerequisites: none for offline contract validation.

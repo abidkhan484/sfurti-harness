@@ -194,7 +194,11 @@ export class ProcessAdapter implements OperationAdapter {
           )
         );
       });
-      child.stdin.end(input);
+      // In Node 24, passing the payload directly to `end()` can close a child
+      // pipe before that payload is flushed. Write the complete JSON frame first
+      // and only then close stdin, so the external process always receives it.
+      child.stdin.write(input);
+      child.stdin.end();
     });
   }
 }

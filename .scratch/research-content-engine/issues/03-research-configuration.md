@@ -56,3 +56,6 @@ Append exact changed files, tests run/results, any unverified external prerequis
 ## Comments
 
 - Created 2026-09-09. No implementation performed as part of specification authoring.
+- Implemented 2026-09-10: extended `src/config.ts` with research/evidence-mode, cadence/collection limits, rolling mix, memory, Piper/renderer, and browser configuration. Defaults preserve legacy mode and disabled research. Added `test/research-config.test.ts`; documented machine-owned setup requirements in `docs/research/operator-setup.md` and secret variable names in `.env.example`.
+- Checks: `node --test --test-reporter spec test/research-config.test.ts` passed; `npm run typecheck` passed; `git diff --check` passed. Full-suite aggregate adapter failure is tracked in ticket 02 comments; standalone adapter test passes. Lint baseline has existing warnings and no errors.
+- Deviations: exact local file existence is intentionally verified by provider tickets because paths may be absent until opt-in installation. External prerequisites: service endpoints, media tools/models, Page permissions, and tokens remain operator-provided.

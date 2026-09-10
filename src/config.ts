@@ -26,10 +26,50 @@ export interface Config {
     windows?: { start: string; end: string }[];
     minSpacingMinutes: number | null;
     queueCsvPath: string;
-    [key: string]: any;
+    [key: string]: unknown;
   };
   reserve: { minimumDays: number; continueAboveMinimum: boolean };
   custom: { scheduleByDefault: boolean };
+  productionMode: "legacy" | "evidence";
+  research: {
+    enabled: boolean;
+    languages: string[];
+    queriesPerRun: number;
+    resultsPerQuery: number;
+    newDocumentsPerDay: number;
+    requestsPerHostPerMinute: number;
+    concurrentFetches: number;
+    maxDocumentBytes: number;
+    httpTimeoutMs: number;
+    browserContexts: number;
+    browserPagesPerDay: number;
+    briefsPerTopicRevision: number;
+    cadence: {
+      discoveryHours: number;
+      sourceCheckHours: number;
+      broaderSearchDays: number;
+      reviewDays: number;
+    };
+  };
+  content: {
+    totalPostsPerDay: number;
+    mixWindow: number;
+    weights: { text: number; image: number; video: number };
+  };
+  memory: {
+    enabled: boolean;
+    baseUrl: string | null;
+    apiTokenEnv: string | null;
+    datasets: string[];
+  };
+  tts: {
+    executable: string | null;
+    voiceId: string | null;
+    modelPath: string | null;
+    configPath: string | null;
+  };
+  renderer: { executable: string | null; fontPath: string | null };
+  browser: { enabled: boolean; storageStatePath: string | null; allowedOrigins: string[] };
   limits: {
     concurrency: number;
     maxTasksPerTick: number;
@@ -40,7 +80,7 @@ export interface Config {
     minFreeBytes: number;
     tickMs: number;
   };
-  integrations?: Record<string, any>;
+  integrations?: Record<string, unknown>;
   setup?: { verifiedSample?: string; verifiedAt?: string };
 }
 const defaults: Config = {
@@ -71,6 +111,32 @@ const defaults: Config = {
   },
   reserve: { minimumDays: 90, continueAboveMinimum: true },
   custom: { scheduleByDefault: false },
+  productionMode: "legacy",
+  research: {
+    enabled: false,
+    languages: ["bn", "en"],
+    queriesPerRun: 12,
+    resultsPerQuery: 10,
+    newDocumentsPerDay: 50,
+    requestsPerHostPerMinute: 2,
+    concurrentFetches: 2,
+    maxDocumentBytes: 15 * 1024 * 1024,
+    httpTimeoutMs: 30000,
+    browserContexts: 1,
+    browserPagesPerDay: 20,
+    briefsPerTopicRevision: 3,
+    cadence: { discoveryHours: 24, sourceCheckHours: 24, broaderSearchDays: 7, reviewDays: 30 },
+  },
+  content: { totalPostsPerDay: 5, mixWindow: 20, weights: { text: 0.1, image: 0.25, video: 0.65 } },
+  memory: {
+    enabled: false,
+    baseUrl: null,
+    apiTokenEnv: null,
+    datasets: ["audience", "evidence", "approved_claim", "editorial_history"],
+  },
+  tts: { executable: null, voiceId: null, modelPath: null, configPath: null },
+  renderer: { executable: null, fontPath: null },
+  browser: { enabled: false, storageStatePath: null, allowedOrigins: [] },
   limits: {
     concurrency: 1,
     maxTasksPerTick: 5,
@@ -82,13 +148,16 @@ const defaults: Config = {
     tickMs: 30000,
   },
 };
-function merge(base: any, input: any): any {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function merge(base: unknown, input: unknown): unknown {
   const result = structuredClone(base);
-  for (const [key, value] of Object.entries(input ?? {})) {
-    result[key] =
-      value && typeof value === "object" && !Array.isArray(value)
-        ? merge(base?.[key] ?? {}, value)
-        : value;
+  if (!isRecord(result) || !isRecord(input)) return input;
+  const baseRecord = isRecord(base) ? base : {};
+  for (const [key, value] of Object.entries(input)) {
+    result[key] = isRecord(value) ? merge(baseRecord[key] ?? {}, value) : value;
   }
   return result;
 }
@@ -97,7 +166,7 @@ export function loadConfig(
   env: NodeJS.ProcessEnv = process.env
 ): Config {
   const fromFile = env.SFURTI_CONFIG ? JSON.parse(readFileSync(env.SFURTI_CONFIG, "utf8")) : {};
-  const config: Config = merge(merge(defaults, fromFile), input);
+  const config = merge(merge(defaults, fromFile), input) as Config;
   const overrides = {
     DAILY_VIDEO_COUNT: "videos",
     DAILY_IMAGE_COUNT: "images",
@@ -166,13 +235,14 @@ export function loadConfig(
   );
   for (const [taskType, assignment] of Object.entries(config.llm.taskModels ?? {}))
     check(
-      !["generation", "review"].includes(taskType) ||
+      !["search", "topic-validation", "generation", "review"].includes(taskType) ||
         !assignment ||
         typeof assignment !== "object" ||
-        typeof (assignment as any).provider !== "string" ||
-        !(assignment as any).provider.trim() ||
-        typeof (assignment as any).model !== "string" ||
-        !(assignment as any).model.trim(),
+        !isRecord(assignment) ||
+        typeof assignment.provider !== "string" ||
+        !assignment.provider.trim() ||
+        typeof assignment.model !== "string" ||
+        !assignment.model.trim(),
       `llm.taskModels.${taskType} requires a nonempty provider and model`
     );
   check(
@@ -192,6 +262,55 @@ export function loadConfig(
       `limits.${key} must be a positive integer`
     );
   check(config.limits.leaseMs <= config.limits.taskTimeoutMs, "Lease must outlive task timeout");
+  check(
+    !["legacy", "evidence"].includes(config.productionMode),
+    "productionMode must be legacy or evidence"
+  );
+  for (const [key, value] of Object.entries(config.research)) {
+    if (key === "enabled" || key === "languages" || key === "cadence") continue;
+    check(
+      !Number.isSafeInteger(value) || (value as number) <= 0,
+      `research.${key} must be a positive integer`
+    );
+  }
+  check(
+    !Array.isArray(config.research.languages) ||
+      !config.research.languages.length ||
+      config.research.languages.some(
+        (language) => typeof language !== "string" || !language.trim()
+      ),
+    "research.languages must be nonempty language identifiers"
+  );
+  for (const [key, value] of Object.entries(config.research.cadence))
+    check(
+      !Number.isSafeInteger(value) || (value as number) <= 0,
+      `research.cadence.${key} must be a positive integer`
+    );
+  const weightTotal =
+    config.content.weights.text + config.content.weights.image + config.content.weights.video;
+  check(Math.abs(weightTotal - 1) > 0.000001, "content.weights must sum to 1");
+  check(
+    !Number.isSafeInteger(config.content.totalPostsPerDay) || config.content.totalPostsPerDay < 1,
+    "content.totalPostsPerDay must be a positive integer"
+  );
+  check(
+    !Number.isSafeInteger(config.content.mixWindow) ||
+      config.content.mixWindow < config.content.totalPostsPerDay,
+    "content.mixWindow must be at least totalPostsPerDay"
+  );
+  check(
+    config.memory.enabled &&
+      (!config.memory.baseUrl || !/^https?:\/\//.test(config.memory.baseUrl)),
+    "memory.baseUrl must be an HTTP base when memory is enabled"
+  );
+  check(
+    config.browser.enabled && !config.browser.storageStatePath,
+    "browser.storageStatePath is required when browser is enabled"
+  );
+  check(
+    config.productionMode === "evidence" && !config.research.enabled,
+    "Evidence productionMode requires research.enabled"
+  );
   check(
     config.posting.minSpacingMinutes !== null &&
       (!Number.isFinite(config.posting.minSpacingMinutes) ||

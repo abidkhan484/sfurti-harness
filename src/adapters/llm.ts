@@ -1,7 +1,7 @@
 import { AdapterError } from "./process.ts";
 import type { LlmRequest, LlmResult } from "./codex.ts";
 
-export const llmTaskTypes = ["generation", "review"] as const;
+export const llmTaskTypes = ["search", "topic-validation", "generation", "review"] as const;
 export type LlmTaskType = (typeof llmTaskTypes)[number];
 export interface TaskModelAssignment {
   provider: string;
@@ -11,8 +11,18 @@ export type TaskModelAssignments = Partial<Record<LlmTaskType, TaskModelAssignme
 
 export interface LlmProvider {
   capabilities: { text: boolean; images: boolean; audio: boolean; video: boolean };
+  /**
+   * Evidence reviewers require either a distinct returned session ID or this
+   * explicit provider guarantee that every request starts fresh.
+   */
+  freshRequests?: boolean;
   supportsModel(model: string): boolean;
   structured<T>(model: string, request: LlmRequest<T>): Promise<LlmResult<T>>;
+}
+
+export interface RoutedLlmResult<T> extends LlmResult<T> {
+  assignment: TaskModelAssignment;
+  isolation: { sessionIdentity: string | null; freshRequest: boolean };
 }
 
 /** Chooses a configured provider/model while keeping workflow task names provider-neutral. */
@@ -49,7 +59,7 @@ export class TaskModelRouter {
         );
     }
   }
-  async structured<T>(taskType: LlmTaskType, request: LlmRequest<T>): Promise<LlmResult<T>> {
+  async structured<T>(taskType: LlmTaskType, request: LlmRequest<T>): Promise<RoutedLlmResult<T>> {
     const assignment = this.assignments[taskType];
     if (!assignment)
       throw new AdapterError(
@@ -68,6 +78,14 @@ export class TaskModelRouter {
           "rejected",
           `Configured ${assignment.provider}/${assignment.model} for ${taskType} does not support ${capability}`
         );
-    return provider.structured(assignment.model, request);
+    const result = await provider.structured(assignment.model, request);
+    return {
+      ...result,
+      assignment: { ...assignment },
+      isolation: {
+        sessionIdentity: result.threadId,
+        freshRequest: provider.freshRequests === true,
+      },
+    };
   }
 }
