@@ -1,0 +1,21 @@
+services:
+  sfurti:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      SFURTI_CONFIG: /app/config/harness.json
+      TZ: Asia/Dhaka
+    volumes:
+      - sfurti-data:/app/data
+      - sfurti-backups:/app/backups
+      - ./config/harness.json:/app/config/harness.json:ro
+    init: true
+    restart: "no"
+    command: ["doctor"]
+
+volumes:
+  sfurti-data:
+  sfurti-backups:
