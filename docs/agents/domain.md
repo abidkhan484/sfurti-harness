@@ -3,6 +3,7 @@
 This project uses a single context.
 
 Before exploring or changing the project:
+
 - Read the root `CONTEXT.md`.
 - Read decisions in `docs/adr/` relevant to the work.
 

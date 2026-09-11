@@ -8,19 +8,19 @@ The scheduler selects approved, unpublished, topic-relevant library items using 
 
 The main Node process owns the workflow, limits, dependencies, and durable state. Separate worker processes execute bounded tasks. Hermes submits requests and retrieves results through the same application interface used by the daily scheduler.
 
-| Component | Responsibility |
-| --- | --- |
-| Coordinator | Daily snapshots, job creation, worker leases, dependency ordering, retry limits |
-| LLM strategy | Provider-neutral structured decisions and capability reporting; initial Codex SDK adapter |
-| Discovery worker | Keyword generation, YouTube search and metadata enrichment, query/source relationships |
-| Source qualification | Permission eligibility, language, relevance, content inspection, segment candidates |
-| Video worker | Invoke the editing tool with an edit brief; return renders and exact source intervals |
-| Image worker | Render reviewed Bangla copy into a reusable branded layout |
-| Text worker | Produce a Bangla activity or prompt with age framing where needed |
-| Review worker | Independently assess actual artifacts and supporting evidence |
-| Scheduling tool | Draw and persist feasible times from the one-time researched windows |
-| Facebook adapter | Schedule uploads/posts, retain remote IDs, reconcile publication and retries |
-| Hermes adapter | Additional requests, source registration, status, artifacts, and shortfall reports |
+| Component            | Responsibility                                                                            |
+| -------------------- | ----------------------------------------------------------------------------------------- |
+| Coordinator          | Daily snapshots, job creation, worker leases, dependency ordering, retry limits           |
+| LLM strategy         | Provider-neutral structured decisions and capability reporting; initial Codex SDK adapter |
+| Discovery worker     | Keyword generation, YouTube search and metadata enrichment, query/source relationships    |
+| Source qualification | Permission eligibility, language, relevance, content inspection, segment candidates       |
+| Video worker         | Invoke the editing tool with an edit brief; return renders and exact source intervals     |
+| Image worker         | Render reviewed Bangla copy into a reusable branded layout                                |
+| Text worker          | Produce a Bangla activity or prompt with age framing where needed                         |
+| Review worker        | Independently assess actual artifacts and supporting evidence                             |
+| Scheduling tool      | Draw and persist feasible times from the one-time researched windows                      |
+| Facebook adapter     | Schedule uploads/posts, retain remote IDs, reconcile publication and retries              |
+| Hermes adapter       | Additional requests, source registration, status, artifacts, and shortfall reports        |
 
 Pass identifiers and structured results between stages, rather than copying large media files through LLM messages. Validate task output before committing it or enqueueing a dependent task. Store failures as explicit results, not empty successful payloads.
 
@@ -98,7 +98,6 @@ flowchart TD
     TelegramTransport --> Operator
 ```
 
-
 ## Replaceable LLM strategy
 
 The application contract should accept a task purpose, mission version, input/evidence references, an output schema, and cancellation/limits. It should return a validated decision or a classified error, plus provider/model metadata and available usage details. Expose capabilities so an adapter cannot silently discard required evidence.
@@ -111,20 +110,20 @@ The installed Codex SDK exposes structured output plus text and local-image inpu
 
 Use SQLite with transactions for state transitions and uniqueness/reservation enforcement. Large artifacts live in the media directory; records retain locations and checksums. Serialize coordinator decisions that claim work, while permitting workers to perform expensive tasks concurrently outside write transactions.
 
-| Record | Important relationships and evidence |
-| --- | --- |
-| `daily_plans` | Bangladesh date, resolved configuration snapshot, per-type targets, completion state |
-| `jobs` / `tasks` | Scheduled or custom origin, plan reference, dependencies, attempts, leases, errors |
-| `keyword_batches` / `keywords` | Topic, language, intent, generation task, mission/provider version |
-| `source_videos` | Unique YouTube ID, URL, channel, metadata, language, duration, statistics fetch date |
-| `search_matches` | Keyword-to-video mapping, rank, query parameters, discovery timestamp |
-| `source_permissions` | Source, evidence/file references, scope, attribution, restrictions, expiry |
-| `source_segments` | Source ID, original start/end in milliseconds, transcript/evidence references |
-| `artifacts` | Content type, paths, versions, producing task, approval state |
-| `artifact_segments` | Many-to-many artifact/segment mapping, source and output intervals |
-| `reviews` | Artifact version, evidence coverage, per-criterion decisions, corrections, final result |
-| `posting_windows` | Saved ranges, timezone, evidence references, setup research date |
-| `posts` | Artifact, plan/custom origin, selected time, remote ID, schedule/publication state |
+| Record                         | Important relationships and evidence                                                    |
+| ------------------------------ | --------------------------------------------------------------------------------------- |
+| `daily_plans`                  | Bangladesh date, resolved configuration snapshot, per-type targets, completion state    |
+| `jobs` / `tasks`               | Scheduled or custom origin, plan reference, dependencies, attempts, leases, errors      |
+| `keyword_batches` / `keywords` | Topic, language, intent, generation task, mission/provider version                      |
+| `source_videos`                | Unique YouTube ID, URL, channel, metadata, language, duration, statistics fetch date    |
+| `search_matches`               | Keyword-to-video mapping, rank, query parameters, discovery timestamp                   |
+| `source_permissions`           | Source, evidence/file references, scope, attribution, restrictions, expiry              |
+| `source_segments`              | Source ID, original start/end in milliseconds, transcript/evidence references           |
+| `artifacts`                    | Content type, paths, versions, producing task, approval state                           |
+| `artifact_segments`            | Many-to-many artifact/segment mapping, source and output intervals                      |
+| `reviews`                      | Artifact version, evidence coverage, per-criterion decisions, corrections, final result |
+| `posting_windows`              | Saved ranges, timezone, evidence references, setup research date                        |
+| `posts`                        | Artifact, plan/custom origin, selected time, remote ID, schedule/publication state      |
 
 Retain API metadata only under the applicable refresh/retention requirements, to be verified during the YouTube integration. Preserve required lineage even when replaceable metadata snapshots are refreshed.
 

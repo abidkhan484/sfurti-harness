@@ -16,11 +16,11 @@ The application runtime is implemented and tested with controlled external adapt
 
 Precedence: built-in defaults, `SFURTI_CONFIG` JSON, explicit application options, then environment count overrides. The CLI defaults to `config/harness.json` when present. All relative paths are project-root relative. `.env` is loaded by the npm command.
 
-| Environment | JSON field | Default |
-| --- | --- | --- |
-| `DAILY_VIDEO_COUNT` | `daily.videos` | 3 |
-| `DAILY_IMAGE_COUNT` | `daily.images` | 1 |
-| `DAILY_TEXT_COUNT` | `daily.texts` | 1 |
+| Environment         | JSON field     | Default |
+| ------------------- | -------------- | ------- |
+| `DAILY_VIDEO_COUNT` | `daily.videos` | 3       |
+| `DAILY_IMAGE_COUNT` | `daily.images` | 1       |
+| `DAILY_TEXT_COUNT`  | `daily.texts`  | 1       |
 
 Counts must be nonnegative safe integers. All-zero counts produce no recurring work. Custom requests are independent. Today's first daily workflow seals its settings. Future local plans rebuild for topic/count changes, preserving today's snapshot and Facebook-confirmed schedules; uncertain remote operations must reconcile first.
 

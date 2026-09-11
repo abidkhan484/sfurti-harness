@@ -19,6 +19,10 @@ npm run sfurti -- doctor
 
 Copy `config/harness.example.json` to `config/harness.json` and `.env.example` to `.env`. Counts are configurable; zero disables a daily type. Do not enable the service until `doctor` reports the setup complete and the live checks in [integration setup](docs/integrations.md) have been performed.
 
+## Research engine setup
+
+The Research → Content Engine is additive and remains disabled by default. Before enabling evidence mode, follow the [operator checklist](docs/research/operator-setup.md), [Cognee setup](docs/research/cognee-setup.md), [Piper bn_BD setup](docs/research/piper-bn-bd-setup.md), and [Docker Compose guide](docs/research/docker-compose.md). These guides cover local validation only; an explicit operator command and remote reconciliation are still required for any Page publication.
+
 ## Operating boundaries
 
 - `src/app.ts` exports `createHarness(...).execute(command)`, shared by CLI, coordinator and authorized Telegram requests.
