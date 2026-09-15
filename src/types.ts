@@ -4,11 +4,13 @@ import type { Config } from "./config.ts";
 /** Serialized application commands are shared by the CLI, coordinator, and Hermes. */
 export interface Command {
   type: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any;
 }
 export interface Context {
   store: Store;
   config: Config;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   adapters: Record<string, any>;
   now(): Date;
   random(): number;

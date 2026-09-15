@@ -1,0 +1,37 @@
+services:
+  sfurti:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    platform: linux/arm64
+    restart: unless-stopped
+    user: "1000:1000"
+    command: ["doctor"]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - sfurti-data:/app/data
+      - sfurti-backups:/app/backups
+      - ./config/harness.json:/app/config/harness.json:ro
+      - ./config/posting-windows.json:/app/config/posting-windows.json:ro
+      - ./config/pi-tool-manifest.json:/app/config/pi-tool-manifest.json:ro
+      - ./data/inbox:/app/inbox:ro
+      - ./data/private/codex:/run/sfurti/codex
+      - ./data/private/secrets:/run/secrets/sfurti:ro
+    depends_on:
+      searxng:
+        condition: service_healthy
+  searxng:
+    image: ghcr.io/searxng/searxng:2026.9.11-61d660276@sha256:1306e2f5e061ecb5e303ca77428b071f58463b83a1bce08f27af6188ae01773d
+    platform: linux/arm64
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    expose: ["8080"]
+    healthcheck:
+      test:
+        ["CMD-SHELL", "wget -qO- 'http://localhost:8080/search?q=sfurti&format=json' >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+volumes:
+  sfurti-data:
+  sfurti-backups:

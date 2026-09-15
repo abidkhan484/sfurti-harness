@@ -1,4 +1,127 @@
 import { AdapterError, isRecord, type OperationAdapter } from "./process.ts";
+import { readFileSync, statSync } from "node:fs";
+import { basename } from "node:path";
+import { resolveSecretFile } from "../deployment/secrets.ts";
+import type { Store, RecordData } from "../store.ts";
+
+const hostedLimitBytes = 50 * 1024 * 1024;
+export type TelegramHttp = (request: {
+  url: string;
+  body: FormData;
+  signal?: AbortSignal;
+}) => Promise<{ status: number; body: unknown }>;
+/** Built-in private delivery with durable uncertainty instead of duplicate resend. */
+export class TelegramDelivery {
+  private readonly options: {
+    operatorUserId: string;
+    tokenFile: string;
+    store: Store;
+    request: TelegramHttp;
+    endpoint?: string;
+  };
+  constructor(options: {
+    operatorUserId: string;
+    tokenFile: string;
+    store: Store;
+    request: TelegramHttp;
+    endpoint?: string;
+  }) {
+    if (!/^[1-9]\d*$/.test(options.operatorUserId))
+      throw new AdapterError("configuration", "Telegram requires a positive operator user ID");
+    this.options = options;
+  }
+  async send(
+    input: { text: string; artifactPaths?: string[] },
+    requestId: string,
+    signal?: AbortSignal
+  ) {
+    const existing = this.options.store.get<RecordData>(
+      "operation_journals",
+      `telegram:${requestId}`
+    );
+    if (existing?.phase === "confirmed") return existing.result;
+    if (existing?.uncertainty)
+      throw new AdapterError(
+        "transient",
+        "Telegram delivery is held for explicit reconciliation",
+        true
+      );
+    const paths = input.artifactPaths ?? [];
+    for (const path of paths)
+      if (!statSync(path).isFile() || statSync(path).size > hostedLimitBytes)
+        throw new AdapterError(
+          "rejected",
+          "Telegram hosted Bot API attachment exceeds the 50 MiB limit"
+        );
+    const token = resolveSecretFile({ tokenFile: this.options.tokenFile }, "Telegram");
+    this.options.store.put("operation_journals", {
+      id: `telegram:${requestId}`,
+      operationId: `telegram:${requestId}`,
+      destinationIdentity: this.options.operatorUserId,
+      selectedArtifactHash: paths.join(","),
+      phase: "intent",
+      requestFingerprint: requestId,
+      attempt: (existing?.attempt ?? 0) + 1,
+      remoteIds: [],
+      lastConfirmedState: "none",
+      uncertainty: false,
+    });
+    const body = new FormData();
+    body.set("chat_id", this.options.operatorUserId);
+    body.set("caption", input.text.slice(0, 1024));
+    for (const [index, path] of paths.entries())
+      body.append(
+        index ? `document${index}` : "document",
+        new Blob([readFileSync(path)]),
+        basename(path)
+      );
+    let response: {
+      status: number;
+      body: { ok?: boolean; result?: { message_id?: number; document?: { file_id?: string } } };
+    };
+    try {
+      response = (await this.options.request({
+        url: `${this.options.endpoint ?? "https://api.telegram.org"}/bot${token}/${paths.length ? "sendDocument" : "sendMessage"}`,
+        body,
+        signal,
+      })) as {
+        status: number;
+        body: { ok?: boolean; result?: { message_id?: number; document?: { file_id?: string } } };
+      };
+    } catch {
+      this.options.store.put("operation_journals", {
+        id: `telegram:${requestId}`,
+        ...this.options.store.get<RecordData>("operation_journals", `telegram:${requestId}`),
+        phase: "unknown",
+        uncertainty: true,
+        lastConfirmedState: "unknown",
+      });
+      throw new AdapterError(
+        "transient",
+        "Telegram response was lost; do not resend automatically",
+        true
+      );
+    }
+    if (response.status === 429)
+      throw new AdapterError("rate_limit", "Telegram rate limited delivery", false);
+    if (response.status < 200 || response.status >= 300 || response.body?.ok !== true)
+      throw new AdapterError("transient", "Telegram rejected delivery", false);
+    const result = {
+      messageId: response.body.result?.message_id,
+      fileId: response.body.result?.document?.file_id,
+    };
+    this.options.store.put("operation_journals", {
+      id: `telegram:${requestId}`,
+      ...this.options.store.get<RecordData>("operation_journals", `telegram:${requestId}`),
+      phase: "confirmed",
+      uncertainty: false,
+      remoteIds: [String(result.messageId ?? "")].filter(Boolean),
+      lastConfirmedState: "sent",
+      result,
+    });
+    return result;
+  }
+}
 export interface ApplicationCommands {
   execute(command: { type: string; [key: string]: unknown }): Promise<unknown>;
 }

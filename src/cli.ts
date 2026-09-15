@@ -40,6 +40,12 @@ const help = `Sfurti harness (Node 24+)
   npm run sfurti -- pause [--paused] | resume
   npm run sfurti -- retry ARTIFACT_ID --reason "..."
   npm run sfurti -- backup --destination PATH
+  npm run sfurti -- command --json '{"type":"setup-probe","target":"codex|search|facebook","requestId":"ID"}'
+  npm run sfurti -- command --json '{"type":"setup-sample","sourceId":"ID","requestId":"ID"}'
+  npm run sfurti -- command --json '{"type":"setup-sample-status","requestId":"ID"}'
+  npm run sfurti -- command --json '{"type":"setup-send","artifactId":"ID","requestId":"ID"}'
+  npm run sfurti -- command --json '{"type":"setup-attest","artifactId":"ID"}'
+  npm run sfurti -- command --json '{"type":"setup-benchmark","requestId":"ID"}'
   npm run sfurti -- start
 Set SFURTI_CONFIG or copy config/harness.example.json to config/harness.json.
 Source permission JSON must include evidencePath, scope array, and applicable restrictions/expiry.

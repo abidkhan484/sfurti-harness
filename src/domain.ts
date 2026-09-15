@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, openSync, readSync, statSync } from "node:fs";
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -24,8 +24,24 @@ export function fileIntegrity(
   const stat = statSync(path);
   if (!stat.isFile() || !stat.size)
     throw new Error("A nonempty artifact or evidence file is required");
-  const bytes = readFileSync(path);
-  const result = { bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
+  const fd = openSync(path, "r");
+  const hash = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  let bytes = 0;
+  try {
+    for (;;) {
+      const read = readSync(fd, buffer, 0, buffer.length, null);
+      if (!read) break;
+      bytes += read;
+      hash.update(buffer.subarray(0, read));
+    }
+  } finally {
+    closeSync(fd);
+  }
+  const after = statSync(path);
+  if (after.size !== stat.size || after.mtimeMs !== stat.mtimeMs)
+    throw new Error("File changed while integrity was being read");
+  const result = { bytes, sha256: hash.digest("hex") };
   if (expected !== undefined && (!record(expected) || expected.sha256 !== result.sha256))
     throw new Error("Registered file integrity changed");
   return result;

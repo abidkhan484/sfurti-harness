@@ -1,8 +1,11 @@
 import { validReview, reviewSchema, type Review } from "../domain.ts";
+import { Readable } from "node:stream";
 export { validReview, type Review } from "../domain.ts";
 import { AdapterError, isRecord, ProcessAdapter, type ProcessConfig } from "./process.ts";
 import { CodexStrategy, type CodexConfig } from "./codex.ts";
 import { TaskModelRouter, type TaskModelAssignments } from "./llm.ts";
+import { LocalDiscovery } from "./local/discovery.ts";
+import { FacebookGraph, type FacebookConfig } from "./facebook.ts";
 export { TelegramOperator } from "./telegram.ts";
 export { CodexStrategy } from "./codex.ts";
 export {
@@ -12,6 +15,7 @@ export {
   type TaskModelAssignments,
 } from "./llm.ts";
 export { AdapterError, ProcessAdapter } from "./process.ts";
+export { FacebookGraph, type FacebookConfig, type FacebookHttp } from "./facebook.ts";
 
 type Data = Record<string, unknown>;
 const nonempty = (value: unknown): value is string =>
@@ -223,28 +227,34 @@ export function createConfiguredAdapters(
             ),
         }
       : undefined,
-    discovery: discovery
-      ? {
-          discover: async (input: unknown) =>
-            checked(
-              await discovery.call("discovery.discover", input),
-              (v): v is { keywords: Data[]; sources: Data[]; matches: Data[] } =>
-                isRecord(v) &&
-                Array.isArray(v.keywords) &&
-                v.keywords.every(
-                  (k) =>
-                    isRecord(k) && nonempty(k.query) && nonempty(k.language) && nonempty(k.intent)
-                ) &&
-                Array.isArray(v.sources) &&
-                v.sources.every((s) => isRecord(s) && nonempty(s.id) && nonempty(s.title)) &&
-                Array.isArray(v.matches) &&
-                v.matches.every(
-                  (m) => isRecord(m) && nonempty(m.keywordId) && nonempty(m.sourceId)
+    discovery:
+      isRecord(integrations.discovery) && integrations.discovery.kind === "searxng"
+        ? new LocalDiscovery(integrations.discovery as never)
+        : discovery
+          ? {
+              discover: async (input: unknown) =>
+                checked(
+                  await discovery.call("discovery.discover", input),
+                  (v): v is { keywords: Data[]; sources: Data[]; matches: Data[] } =>
+                    isRecord(v) &&
+                    Array.isArray(v.keywords) &&
+                    v.keywords.every(
+                      (k) =>
+                        isRecord(k) &&
+                        nonempty(k.query) &&
+                        nonempty(k.language) &&
+                        nonempty(k.intent)
+                    ) &&
+                    Array.isArray(v.sources) &&
+                    v.sources.every((s) => isRecord(s) && nonempty(s.id) && nonempty(s.title)) &&
+                    Array.isArray(v.matches) &&
+                    v.matches.every(
+                      (m) => isRecord(m) && nonempty(m.keywordId) && nonempty(m.sourceId)
+                    ),
+                  "discovery.discover"
                 ),
-              "discovery.discover"
-            ),
-        }
-      : undefined,
+            }
+          : undefined,
     reviewer: reviewer
       ? {
           review: async (input: unknown) =>
@@ -256,7 +266,34 @@ export function createConfiguredAdapters(
     facebook:
       integrations.facebook === undefined
         ? undefined
-        : new ProcessFacebook(integrations.facebook as ProcessConfig),
+        : isRecord(integrations.facebook) && integrations.facebook.kind === "graph"
+          ? new FacebookGraph(integrations.facebook as unknown as FacebookConfig, {
+              request: async ({ method, url, headers, body, signal }) => {
+                const request = {
+                  method,
+                  headers,
+                  body:
+                    body === undefined
+                      ? undefined
+                      : body instanceof Readable
+                        ? Readable.toWeb(body)
+                        : JSON.stringify(body),
+                  signal,
+                  ...(body instanceof Readable ? { duplex: "half" as const } : {}),
+                };
+                // Node's stream/web type and the DOM fetch declaration disagree in
+                // TypeScript 6, though Node fetch accepts this converted stream.
+                const response = await fetch(url, request as RequestInit);
+                let json: unknown;
+                try {
+                  json = await response.json();
+                } catch {
+                  json = {};
+                }
+                return { status: response.status, json };
+              },
+            })
+          : new ProcessFacebook(integrations.facebook as ProcessConfig),
     delivery: telegram?.transport
       ? {
           send: async (

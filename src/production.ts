@@ -8,8 +8,10 @@ import {
 import { copyFileSync, mkdirSync, readFileSync, statfsSync } from "node:fs";
 import { extname, join } from "node:path";
 import { today, type Context, type Command } from "./types.ts";
+import { deferQuotaTask, quotaBlocked } from "./deployment/quota.ts";
+import { parseRecommendation } from "./deployment/contracts.ts";
+import type { RecordData } from "./store.ts";
 
-type RecordData = Record<string, any> & { id: string };
 export type Segment = { startMs: number; endMs: number };
 export type Artifact = RecordData & {
   kind: "video" | "image" | "text";
@@ -52,12 +54,12 @@ function problem(version: number, criterion: string, evidence: string, correctio
 async function inspect(
   ctx: Context,
   artifact: Artifact,
-  version: any,
-  source: any,
+  version: RecordData,
+  source: RecordData | undefined,
   signal: AbortSignal
 ) {
-  const findings: any[] = [];
-  let evidence: any = {};
+  const findings: Record<string, unknown>[] = [];
+  let evidence: Record<string, unknown> = {};
   try {
     version.integrity = validFile(version.filePath);
     if (!ctx.adapters.media?.inspect)
@@ -70,11 +72,12 @@ async function inspect(
       signal,
     });
     signal.throwIfAborted();
-    evidence = inspected.evidence ?? {};
+    evidence = (inspected.evidence as Record<string, unknown>) ?? {};
     if (inspected.valid !== true) throw new Error("Media inspection rejected file");
     if (artifact.kind === "text") {
       evidence.text = readFileSync(version.filePath, "utf8");
-      if (!/[\u0980-\u09ff]/u.test(evidence.text)) throw new Error("Bangla text is missing");
+      if (!/[\u0980-\u09ff]/u.test(evidence.text as string))
+        throw new Error("Bangla text is missing");
     } else if (artifact.kind === "image") {
       if (!Array.isArray(evidence.frames) || !evidence.frames.length)
         throw new Error("Image review evidence is missing");
@@ -92,8 +95,8 @@ async function inspect(
         !evidence.frames.length ||
         typeof evidence.transcript !== "string" ||
         !evidence.transcript.trim() ||
-        evidence.audio?.intelligible !== true ||
-        !evidence.audio?.coverage
+        (evidence.audio as { intelligible?: boolean })?.intelligible !== true ||
+        !(evidence.audio as { coverage?: unknown })?.coverage
       )
         throw new Error("Timestamped frame, transcript and audio inspection evidence required");
       for (const frame of evidence.frames) {
@@ -110,11 +113,12 @@ async function inspect(
       if (!evidence.coverage || !evidence.limitations)
         throw new Error("Video review coverage and limitations must be recorded");
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     signal.throwIfAborted();
+    const err = error as { code?: string; kind?: string };
     if (
       ["RATE_LIMIT", "QUOTA_EXCEEDED", "rate_limit", "rate-limit", "quota"].includes(
-        error.code ?? error.kind
+        err.code ?? err.kind ?? ""
       )
     )
       throw error;
@@ -174,7 +178,7 @@ async function inspect(
       )
     );
   for (const key of failed)
-    if (!review?.findings?.some((f: any) => f.criterion === key))
+    if (!review?.findings?.some((f: { criterion?: string }) => f.criterion === key))
       findings.push(
         problem(
           version.number,
@@ -211,8 +215,113 @@ function claimWorkload(ctx: Context, taskId: string): boolean {
   });
 }
 
-export async function production(ctx: Context, command: Command): Promise<unknown> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function production(ctx: Context, command: Command): Promise<any> {
   const store = ctx.store;
+  if (command.type === "qualify-source") {
+    if (typeof command.sourceId !== "string" || !command.sourceId)
+      throw new Error("Source ID required");
+    const source = store.get<RecordData>("sources", command.sourceId);
+    if (!source) throw new Error("Unknown source");
+    assertPermission(source, ctx.now(), { requireStoredIntegrity: true });
+    if (!ctx.adapters.media?.inspectSource || !ctx.adapters.qualifier?.qualify)
+      throw new Error("Source inspection and isolated qualification adapters are required");
+    const taskId = `qualification:${command.requestId ?? source.id}`;
+    const prior = store.get<RecordData>("tasks", taskId);
+    if (prior?.status === "completed") return prior.result;
+    const owner = ctx.id();
+    store.put("tasks", {
+      id: taskId,
+      status: "running",
+      sourceId: source.id,
+      leaseOwner: owner,
+      leaseUntil: new Date(ctx.now().getTime() + ctx.config.limits.leaseMs).toISOString(),
+    });
+    const inspection = await ctx.adapters.media.inspectSource({
+      filePath: source.filePath,
+      sourceIntegrity: source.integrity,
+      signal: command.signal,
+    });
+    if (
+      !inspection ||
+      !Array.isArray(inspection.frames) ||
+      !inspection.frames.length ||
+      typeof inspection.transcript !== "string" ||
+      !inspection.transcript.trim() ||
+      !Number.isSafeInteger(inspection.durationMs) ||
+      inspection.durationMs <= 0
+    )
+      throw new Error("Source inspection requires timed frames, transcript and duration");
+    const decision = await ctx.adapters.qualifier.qualify({
+      source: { id: source.id, language: source.language, integrity: source.integrity },
+      inspection: {
+        frames: inspection.frames,
+        transcript: inspection.transcript,
+        limitations: inspection.limitations ?? [],
+      },
+      mission: ctx.mission,
+      topic: command.topic ?? ctx.config.topic,
+      signal: command.signal,
+    });
+    const candidateSets = Array.isArray(decision?.candidateSets) ? decision.candidateSets : [];
+    const validSets = candidateSets
+      .map((set: unknown) => intervals(set))
+      .filter((set: Segment[]) => {
+        const total = set.reduce((sum, segment) => sum + segment.endMs - segment.startMs, 0);
+        return (
+          total >= 30_000 &&
+          total <= 60_000 &&
+          set.every((segment) => segment.endMs <= inspection.durationMs)
+        );
+      });
+    if (
+      !validSets.length ||
+      !["relevant", "credible", "locallyRelevant"].every((key) => decision?.[key] === true)
+    )
+      throw new Error(
+        "Qualification needs supported relevance, credibility, local relevance and in-bounds 30–60 second candidates"
+      );
+    const evidence = validFile(inspection.evidencePath);
+    const qualification = {
+      sourceId: source.id,
+      sourceSha256: source.integrity.sha256,
+      missionVersion: ctx.mission.version,
+      topic: command.topic ?? ctx.config.topic,
+      topics: decision.topics ?? [command.topic ?? ctx.config.topic],
+      segments: validSets[0],
+      candidateSets: validSets,
+      evidencePath: inspection.evidencePath,
+      evidenceSha256: evidence.sha256,
+      reviewerIdentity: decision.reviewerIdentity ?? "isolated-qualifier",
+      qualifiedAt: ctx.now().toISOString(),
+      relevant: true,
+      credible: true,
+      actualContentReviewed: true,
+      locallyRelevant: true,
+      limitations: [...(inspection.limitations ?? []), ...(decision.limitations ?? [])],
+    };
+    const updated = {
+      ...source,
+      metadata: {
+        ...source.metadata,
+        qualified: true,
+        topic: qualification.topic,
+        topics: qualification.topics,
+        segments: qualification.segments,
+        candidateSets: qualification.candidateSets,
+        qualification,
+      },
+    };
+    store.transaction(() => {
+      store.put("qualifications", {
+        id: `${source.id}:${source.integrity.sha256}:${ctx.mission.version}`,
+        ...qualification,
+      });
+      store.put("sources", updated);
+      store.put("tasks", { id: taskId, status: "completed", sourceId: source.id, result: updated });
+    });
+    return updated;
+  }
   if (command.type === "discover") {
     if (!ctx.adapters.discovery?.discover) throw new Error("Discovery adapter is not configured");
     const taskId = `discovery:${command.requestId ?? ctx.id()}`;
@@ -240,6 +349,7 @@ export async function production(ctx: Context, command: Command): Promise<unknow
     });
     if ("result" in claim) return claim.result;
     const batchId = claim.batchId;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let result: any;
     try {
       result = await ctx.adapters.discovery.discover({
@@ -264,26 +374,30 @@ export async function production(ctx: Context, command: Command): Promise<unknow
       throw new Error("Discovery ownership lost");
     if (!Array.isArray(result?.keywords) || !Array.isArray(result.sources))
       throw new Error("Malformed discovery result");
-    const keywords = result.keywords.map((keyword: any) => {
+    const keywords = (result.keywords as Array<Record<string, unknown>>).map((keyword) => {
       if (!keyword.query || !keyword.language || !keyword.intent)
         throw new Error("Keyword requires query, language and intent");
       return {
         ...keyword,
         externalId: keyword.id,
-        id: `${batchId}:${keyword.id ?? ctx.id()}`,
+        id: `${batchId}:${(keyword.id as string) ?? ctx.id()}`,
         batchId,
         topic,
         missionVersion: ctx.mission.version,
       };
     });
-    const sources = result.sources.map((source: any) => {
+    const sources = (result.sources as Array<Record<string, unknown>>).map((source) => {
       if (!source.id || !source.title) throw new Error("Source identity and title required");
-      const existing = store.get<RecordData>("sources", source.id);
-      const metadata = { ...existing?.metadata, ...source, ...source.metadata };
+      const existing = store.get<RecordData>("sources", source.id as string);
+      const metadata = {
+        ...existing?.metadata,
+        ...source,
+        ...(source.metadata as Record<string, unknown>),
+      };
       delete metadata.permission;
       delete metadata.filePath;
       delete metadata.metadata;
-      const qualification = metadata.qualification;
+      const qualification = metadata.qualification as Record<string, unknown> | undefined;
       metadata.qualified = false;
       if (
         qualification &&
@@ -292,7 +406,7 @@ export async function production(ctx: Context, command: Command): Promise<unknow
         )
       ) {
         try {
-          const integrity = validFile(qualification.evidencePath);
+          const integrity = validFile(qualification.evidencePath as string);
           metadata.segments = intervals(metadata.segments);
           metadata.qualification = {
             ...qualification,
@@ -306,7 +420,7 @@ export async function production(ctx: Context, command: Command): Promise<unknow
       }
       return {
         ...existing,
-        id: source.id,
+        id: source.id as string,
         title: source.title,
         language: source.language,
         metadata,
@@ -314,6 +428,8 @@ export async function production(ctx: Context, command: Command): Promise<unknow
         discoveredAt: existing?.discoveredAt ?? ctx.now().toISOString(),
       };
     });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const recommendations: any[] = [];
     store.transaction(() => {
       store.put("keyword_batches", {
         id: batchId!,
@@ -323,11 +439,11 @@ export async function production(ctx: Context, command: Command): Promise<unknow
       });
       for (const keyword of keywords) store.put("keywords", keyword);
       for (const source of sources) store.put("sources", source);
-      for (const match of result.matches ?? []) {
+      for (const match of (result.matches ?? []) as Record<string, unknown>[]) {
         const keyword = keywords.find(
-          (k: any) => k.externalId === match.keywordId || k.id === match.keywordId
+          (k) => k.externalId === match.keywordId || k.id === match.keywordId
         );
-        if (!keyword || !sources.some((s: any) => s.id === match.sourceId))
+        if (!keyword || !sources.some((s) => s.id === match.sourceId))
           throw new Error("Discovery match references unknown keyword or source");
         store.put("matches", {
           ...match,
@@ -336,8 +452,40 @@ export async function production(ctx: Context, command: Command): Promise<unknow
           batchId,
         });
       }
+      for (const proposed of (result.recommendations ?? []) as Record<string, unknown>[]) {
+        const source = sources.find((candidate) => candidate.id === proposed.sourceId);
+        if (!source) throw new Error("Recommendation references unknown source");
+        const recommendation = parseRecommendation({
+          ...proposed,
+          id: `${batchId}:${proposed.sourceId}`,
+          topic,
+          batchId,
+          discoveredAt: ctx.now().toISOString(),
+          canonicalUrl: proposed.canonicalUrl ?? source.metadata.canonicalUrl,
+          title: proposed.title ?? source.title,
+          language: proposed.language ?? source.language ?? null,
+          tentativeSegments: [],
+        });
+        const existing = store.get<RecordData>("recommendations", recommendation.id);
+        const saved = store.put("recommendations", existing ?? recommendation);
+        recommendations.push(saved);
+        const day = today(ctx);
+        const notificationId = `recommendation:${day}:${topic}:${recommendation.sourceId}`;
+        if (!store.get("notifications", notificationId))
+          store.put("notifications", {
+            id: notificationId,
+            status: "queued",
+            createdAt: ctx.now().toISOString(),
+            event: {
+              type: "source-recommendation",
+              recommendationId: saved.id,
+              message:
+                "অনুমতি-সমর্থিত স্থানীয় ভিডিও ও permission.json/READY ফোল্ডার দিয়ে জমা দিন; আবিষ্কার অনুমতি নয়।",
+            },
+          });
+      }
     });
-    const completed = { batchId, keywords, sources };
+    const completed = { batchId, keywords, sources, recommendations, coverage: result.coverage };
     store.put("meta", { id: taskId, batchId, topic, status: "completed", result: completed });
     return completed;
   }
@@ -471,8 +619,10 @@ export async function production(ctx: Context, command: Command): Promise<unknow
   )
     throw new Error("Unconfigured age segment");
   const backoff = store.get<RecordData>("meta", "production-backoff");
-  if (backoff && Date.parse(backoff.until) > ctx.now().getTime())
+  if (!ctx.config.deployment && backoff && Date.parse(backoff.until) > ctx.now().getTime())
     return { status: "deferred", until: backoff.until, reason: "provider-backoff" };
+  if (ctx.config.deployment && quotaBlocked(store, "codex", ctx.now()))
+    return { status: "deferred", reason: "codex-quota" };
   const filesystem = statfsSync(ctx.config.storage.mediaDirectory);
   const freeBytes = ctx.adapters.storage?.freeBytes
     ? await ctx.adapters.storage.freeBytes()
@@ -527,7 +677,9 @@ export async function production(ctx: Context, command: Command): Promise<unknow
     if (!claimWorkload(ctx, `production:${artifact.id}`))
       return { status: "deferred", reason: "workload-limit" };
     if (artifact.kind === "video") {
-      assertPermission(source, ctx.now());
+      // A source may have been qualified days earlier; every render must
+      // revalidate the retained bytes before consuming its reserved interval.
+      assertPermission(source, ctx.now(), { requireStoredIntegrity: true });
       artifact.segments = intervals(artifact.segments);
       artifact.sourceEvidence = {
         sourceId: source!.id,
@@ -592,7 +744,8 @@ async function produceArtifact(
   owner: string
 ): Promise<Artifact> {
   const store = ctx.store;
-  const bounded = async (operation: (signal: AbortSignal) => Promise<any>) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const bounded = async (operation: (signal: AbortSignal) => Promise<any>): Promise<any> => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -708,16 +861,28 @@ async function produceArtifact(
       artifact.status = "failed";
       artifact.lastError = "Independent review exhausted three total versions";
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     owned();
-    artifact.lastError = String(error.message ?? error);
+    const err = error as { message?: string; code?: string; kind?: string };
+    artifact.lastError = String(err.message ?? error);
     if (
       ["RATE_LIMIT", "QUOTA_EXCEEDED", "rate_limit", "rate-limit", "quota"].includes(
-        error.code ?? error.kind
+        err.code ?? err.kind ?? ""
       )
     ) {
-      const until = new Date(ctx.now().getTime() + ctx.config.limits.backoffMs).toISOString();
-      store.put("meta", { id: "production-backoff", until });
+      if (ctx.config.deployment)
+        deferQuotaTask(store, {
+          taskId: `artifact:${artifact.id}`,
+          role: "generation",
+          provider: "codex",
+          model: "configured",
+          sessionRef: null,
+          now: ctx.now(),
+        });
+      else {
+        const until = new Date(ctx.now().getTime() + ctx.config.limits.backoffMs).toISOString();
+        store.put("meta", { id: "production-backoff", until });
+      }
       artifact.status = "producing";
     } else artifact.status = "failed";
   } finally {

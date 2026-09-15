@@ -19,7 +19,11 @@ export interface Config {
     maxIterations: number;
     initialRenderCountsAsIteration: boolean;
   };
-  llm: { taskModels: Record<string, { provider: string; model: string }> };
+  llm: {
+    taskModels: Record<string, { provider: string; model: string }>;
+    /** Present only for the opt-in Pi profile. It deliberately has no API-key mode. */
+    billingMode?: "chatgpt-only";
+  };
   storage: { databasePath: string; mediaDirectory: string; backupDirectory?: string };
   posting: {
     windowsFile: string;
@@ -82,6 +86,32 @@ export interface Config {
   };
   integrations?: Record<string, unknown>;
   setup?: { verifiedSample?: string; verifiedAt?: string };
+  deployment?: PiFreeDeployment;
+}
+
+export interface PiFreeDeployment {
+  profile: "pi-free";
+  executionMode: "preview" | "live";
+  intake: { path: string; scanSeconds: number; maxVideoBytes: number; maxVideoMinutes: number };
+  localTools: {
+    paths: Record<string, string>;
+    manifestPath: string;
+    maxNativeThreads: number;
+    heavyTaskConcurrency: number;
+    stageDeadlinesMs: { codex: number; render: number; asr: number };
+  };
+  search: {
+    endpoint: string;
+    queriesPerBatch: number;
+    resultsPerQuery: number;
+    maxRecommendationsPerTopic: number;
+    minRequestSpacingMs: number;
+    concurrency: number;
+  };
+  storageBudget: { minFreeBytes: number; managedCeilingBytes: number };
+  setupReceiptPolicy: { connectionMaxAgeDays: number; requireRealReceipts: boolean };
+  delivery: { enabled: boolean };
+  codexAuthDirectory: string;
 }
 const defaults: Config = {
   timezone: "Asia/Dhaka",
@@ -148,6 +178,32 @@ const defaults: Config = {
     tickMs: 30000,
   },
 };
+
+const gib = 1024 * 1024 * 1024;
+const piFreeDefaults: PiFreeDeployment = {
+  profile: "pi-free",
+  executionMode: "preview",
+  intake: { path: "./data/inbox", scanSeconds: 60, maxVideoBytes: 2 * gib, maxVideoMinutes: 60 },
+  localTools: {
+    paths: { ffmpeg: "ffmpeg", ffprobe: "ffprobe", chromium: "chromium", whisper: "whisper-cli" },
+    manifestPath: "./config/pi-tool-manifest.json",
+    maxNativeThreads: 2,
+    heavyTaskConcurrency: 1,
+    stageDeadlinesMs: { codex: 5 * 60_000, render: 30 * 60_000, asr: 60 * 60_000 },
+  },
+  search: {
+    endpoint: "http://searxng:8080",
+    queriesPerBatch: 3,
+    resultsPerQuery: 10,
+    maxRecommendationsPerTopic: 5,
+    minRequestSpacingMs: 1000,
+    concurrency: 1,
+  },
+  storageBudget: { minFreeBytes: 8 * gib, managedCeilingBytes: 32 * gib },
+  setupReceiptPolicy: { connectionMaxAgeDays: 7, requireRealReceipts: true },
+  delivery: { enabled: false },
+  codexAuthDirectory: "./data/private/codex",
+};
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -166,7 +222,14 @@ export function loadConfig(
   env: NodeJS.ProcessEnv = process.env
 ): Config {
   const fromFile = env.SFURTI_CONFIG ? JSON.parse(readFileSync(env.SFURTI_CONFIG, "utf8")) : {};
-  const config = merge(merge(defaults, fromFile), input) as Config;
+  const supplied = merge(fromFile, input) as Record<string, unknown>;
+  const piRequested = isRecord(supplied.deployment) && supplied.deployment.profile === "pi-free";
+  const config = merge(
+    piRequested
+      ? merge(defaults, { deployment: piFreeDefaults, llm: { billingMode: "chatgpt-only" } })
+      : defaults,
+    supplied
+  ) as Config;
   const overrides = {
     DAILY_VIDEO_COUNT: "videos",
     DAILY_IMAGE_COUNT: "images",
@@ -193,6 +256,88 @@ export function loadConfig(
     config.timezone !== "Asia/Dhaka",
     "timezone must be Asia/Dhaka for this single-context harness"
   );
+  if (config.deployment !== undefined) {
+    const d = config.deployment;
+    check(d.profile !== "pi-free", "deployment.profile must be pi-free");
+    check(!["preview", "live"].includes(d.executionMode), "deployment.executionMode is invalid");
+    check(config.llm.billingMode !== "chatgpt-only", "Pi deployment requires ChatGPT-only billing");
+    check(
+      config.productionMode !== "legacy" || config.research.enabled !== false,
+      "Pi profile preserves legacy production with research disabled"
+    );
+    check(
+      config.daily.videos !== 3 || config.daily.images !== 1 || config.daily.texts !== 1,
+      "Pi profile requires the daily 3 videos, 1 image, 1 text target"
+    );
+    check(config.reserve.minimumDays !== 90, "Pi profile requires a 90-day reserve target");
+    const positive = (value: unknown) => !Number.isSafeInteger(value) || Number(value) <= 0;
+    check(
+      !d.intake ||
+        typeof d.intake.path !== "string" ||
+        !d.intake.path ||
+        positive(d.intake.scanSeconds) ||
+        positive(d.intake.maxVideoBytes) ||
+        positive(d.intake.maxVideoMinutes),
+      "Pi intake settings are invalid"
+    );
+    check(
+      !d.localTools ||
+        typeof d.localTools.manifestPath !== "string" ||
+        !d.localTools.manifestPath ||
+        !isRecord(d.localTools.paths) ||
+        Object.values(d.localTools.paths).some((p) => typeof p !== "string" || !p) ||
+        positive(d.localTools.maxNativeThreads) ||
+        positive(d.localTools.heavyTaskConcurrency),
+      "Pi local tool settings are invalid"
+    );
+    check(
+      !d.localTools ||
+        !isRecord(d.localTools.stageDeadlinesMs) ||
+        Object.values(d.localTools.stageDeadlinesMs).some(positive),
+      "Pi stage deadlines are invalid"
+    );
+    check(
+      !d.search ||
+        !/^https?:\/\//.test(d.search.endpoint) ||
+        [
+          d.search.queriesPerBatch,
+          d.search.resultsPerQuery,
+          d.search.maxRecommendationsPerTopic,
+          d.search.minRequestSpacingMs,
+          d.search.concurrency,
+        ].some(positive),
+      "Pi search settings are invalid"
+    );
+    check(
+      !d.storageBudget ||
+        positive(d.storageBudget.minFreeBytes) ||
+        positive(d.storageBudget.managedCeilingBytes) ||
+        d.storageBudget.managedCeilingBytes <= d.storageBudget.minFreeBytes,
+      "Pi storage budget is invalid"
+    );
+    check(
+      !d.setupReceiptPolicy ||
+        positive(d.setupReceiptPolicy.connectionMaxAgeDays) ||
+        typeof d.setupReceiptPolicy.requireRealReceipts !== "boolean",
+      "Pi setup receipt policy is invalid"
+    );
+    check(
+      !d.delivery || typeof d.delivery.enabled !== "boolean",
+      "Pi delivery settings are invalid"
+    );
+    check(
+      typeof d.codexAuthDirectory !== "string" || !d.codexAuthDirectory,
+      "Pi Codex auth directory is required"
+    );
+    const integrations = config.integrations ?? {};
+    check(
+      Object.values(integrations).some(
+        (value) =>
+          isRecord(value) && ("apiKey" in value || "apiKeyEnv" in value || value.auth === "api-key")
+      ),
+      "Pi deployment rejects API-key integration authentication"
+    );
+  }
   check(typeof config.topic !== "string" || !config.topic.trim(), "topic must be nonempty");
   check(
     config.audience.language !== "bn" ||
@@ -330,6 +475,11 @@ export function loadConfig(
   config.storage.mediaDirectory = resolve(config.storage.mediaDirectory);
   config.posting.queueCsvPath = resolve(config.posting.queueCsvPath);
   config.posting.windowsFile = resolve(config.posting.windowsFile);
+  if (config.deployment) {
+    config.deployment.intake.path = resolve(config.deployment.intake.path);
+    config.deployment.localTools.manifestPath = resolve(config.deployment.localTools.manifestPath);
+    config.deployment.codexAuthDirectory = resolve(config.deployment.codexAuthDirectory);
+  }
   if (
     config.storage.databasePath === config.posting.queueCsvPath ||
     dirname(config.storage.databasePath) === config.storage.databasePath

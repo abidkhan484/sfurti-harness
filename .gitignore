@@ -10,7 +10,7 @@ config/harness.json
 # Generated content, queue exports, and SQLite state
 data/
 
-# Local issue-tracker workspace; preserve the approved research engine docs
+# Local issue-tracker workspace; preserve approved feature docs
 .scratch/*
 !.scratch/research-content-engine/
 .scratch/research-content-engine/*
@@ -18,6 +18,12 @@ data/
 !.scratch/research-content-engine/issues/
 .scratch/research-content-engine/issues/*
 !.scratch/research-content-engine/issues/*.md
+!.scratch/pi-free-readiness/
+.scratch/pi-free-readiness/*
+!.scratch/pi-free-readiness/*.md
+!.scratch/pi-free-readiness/issues/
+.scratch/pi-free-readiness/issues/*
+!.scratch/pi-free-readiness/issues/*.md
 
 # Build output, logs, and coverage
 dist/
@@ -36,3 +42,7 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+meta_access_token_file
+
+

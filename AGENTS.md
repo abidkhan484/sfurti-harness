@@ -14,3 +14,5 @@ See `docs/agents/triage-labels.md` when assigning issue status.
 
 Use the single-context glossary and ADR layout.
 See `docs/agents/domain.md` before exploring or changing the project.
+
+Never read meta_access_token_file, never ever

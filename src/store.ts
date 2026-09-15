@@ -41,6 +41,13 @@ const collections = [
   "feedback_items",
   "research_events",
   "correction_cases",
+  "source_submissions",
+  "recommendations",
+  "qualifications",
+  "setup_receipts",
+  "operation_journals",
+  "storage_reservations",
+  "telegram_updates",
 ];
 
 /** One writer transaction owns decisions; external work must occur outside transaction(). */
@@ -66,6 +73,13 @@ export class Store {
         "CREATE INDEX IF NOT EXISTS research_claim_status ON research_claims(json_extract(data, '$.status'));" +
         "CREATE INDEX IF NOT EXISTS memory_job_due ON memory_jobs(json_extract(data, '$.status'), json_extract(data, '$.nextRunAt'));" +
         "INSERT OR IGNORE INTO schema_migrations VALUES (2);"
+    );
+    this.db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS source_submission_identity ON source_submissions(json_extract(data, '$.submissionId'), json_extract(data, '$.manifestSha256'), json_extract(data, '$.videoSha256'), json_extract(data, '$.evidenceSha256'));" +
+        "CREATE INDEX IF NOT EXISTS setup_receipt_target_kind ON setup_receipts(json_extract(data, '$.target'), json_extract(data, '$.kind'), json_extract(data, '$.checkedAt'));" +
+        "CREATE INDEX IF NOT EXISTS operation_journal_destination ON operation_journals(json_extract(data, '$.destinationIdentity'), json_extract(data, '$.selectedArtifactHash'));" +
+        "CREATE INDEX IF NOT EXISTS storage_reservation_status ON storage_reservations(json_extract(data, '$.status'), json_extract(data, '$.leaseUntil'));" +
+        "INSERT OR IGNORE INTO schema_migrations VALUES (3);"
     );
   }
   private table(collection: string): string {

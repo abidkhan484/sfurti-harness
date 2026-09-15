@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "architecture": "arm64",
+  "tools": {
+    "ffmpeg": {
+      "version": "Debian bookworm package recorded at provisioning",
+      "license": "GPL/LGPL"
+    },
+    "ffprobe": {
+      "version": "Debian bookworm package recorded at provisioning",
+      "license": "GPL/LGPL"
+    },
+    "chromium": {
+      "version": "Debian bookworm package recorded at provisioning",
+      "license": "BSD-3-Clause"
+    },
+    "noto-sans-bengali": { "version": "Noto Sans Bengali", "license": "OFL-1.1" },
+    "whisper-cli": {
+      "version": "whisper.cpp commit 5359861c739e955e79d9a303bcbc70fb988958b1",
+      "license": "MIT"
+    }
+  },
+  "whisper": {
+    "model": "small",
+    "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+    "bytes": 487601967,
+    "source": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin"
+  }
+}

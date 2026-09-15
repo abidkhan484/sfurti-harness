@@ -1,5 +1,4 @@
 import {
-  readFileSync,
   mkdirSync,
   openSync,
   writeFileSync,
@@ -12,6 +11,12 @@ import { fileIntegrity, assertSourcePermission } from "./domain.ts";
 import { dirname } from "node:path";
 import { today, type Context, type Command } from "./types.ts";
 import type { Config } from "./config.ts";
+import type { RecordData } from "./store.ts";
+import {
+  loadPostingWindows,
+  postingMinutes,
+  postingWindowsExample,
+} from "./deployment/posting-windows.ts";
 
 type Kind = "video" | "image" | "text";
 export interface Post {
@@ -31,6 +36,9 @@ export interface Post {
     | "cancelled"
     | "failed";
   remoteId?: string;
+  remoteKind?: "page-post" | "reel";
+  remotePageId?: string;
+  remoteApiVersion?: string;
   publishedAt?: string;
   lastError?: string;
   cancelRequested?: boolean;
@@ -42,7 +50,11 @@ function publicConfig(config: Config): Config {
   delete result.integrations;
   return result;
 }
-function eligible(ctx: Context, artifact: any, scheduledAt?: string): boolean {
+function eligible(
+  ctx: Context,
+  artifact: RecordData | undefined,
+  scheduledAt?: string
+): artifact is RecordData {
   try {
     if (!artifact || artifact.status !== "approved") return false;
     fileIntegrity(artifact.filePath, artifact.versions?.at(-1)?.integrity, true);
@@ -82,23 +94,14 @@ function quota(config: Config): Record<Kind, number> {
   return { video: config.daily.videos, image: config.daily.images, text: config.daily.texts };
 }
 function windows(config: Config): number[] {
-  const saved =
-    config.posting.windows ?? JSON.parse(readFileSync(config.posting.windowsFile, "utf8")).windows;
-  const spacing = config.posting.minSpacingMinutes;
-  if (!spacing || !Number.isFinite(spacing) || spacing <= 0)
-    throw new Error("Posting spacing must be established during setup");
-  if (!Array.isArray(saved) || !saved.length) throw new Error("Saved posting windows are required");
-  const minutes = new Set<number>();
-  for (const w of saved) {
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(w.start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(w.end))
-      throw new Error("Invalid posting window");
-    const parse = (s: string) => Number(s.slice(0, 2)) * 60 + Number(s.slice(3));
-    const start = parse(w.start),
-      end = parse(w.end);
-    if (end < start) throw new Error("Posting windows must end on the same day after their start");
-    for (let m = start; m <= end; m++) minutes.add(m);
-  }
-  return [...minutes].sort((a, b) => a - b);
+  // Legacy callers historically supplied just inline ranges. Pi file-backed
+  // setup remains strict in doctor; preserving this avoids changing old APIs.
+  const inline = Array.isArray(config.posting.windows)
+    ? { ...postingWindowsExample, windows: config.posting.windows }
+    : config.posting.windows;
+  return postingMinutes(
+    loadPostingWindows(config.posting.windowsFile, inline, config.posting.minSpacingMinutes)
+  );
 }
 function slots(
   ctx: Context,
@@ -144,9 +147,9 @@ function slots(
 }
 function coverage(ctx: Context, command: Command) {
   const posts = ctx.store.all<Post>("posts"),
-    artifacts = ctx.store.all<any>("artifacts");
+    artifacts = ctx.store.all("artifacts");
   const days = range(ctx, command).map((date) => {
-    const config = ctx.store.get<any>("plans", date)?.config ?? ctx.config;
+    const config = ctx.store.get("plans", date)?.config ?? ctx.config;
     const expected = quota(config),
       actual = { video: 0, image: 0, text: 0 },
       sources = new Set<string>();
@@ -219,7 +222,7 @@ function makePlans(ctx: Context, command: Command) {
       return chosen.map((t) => new Date(t).toISOString());
     }
     for (const date of range(ctx, command)) {
-      const old = ctx.store.get<any>("plans", date);
+      const old = ctx.store.get("plans", date);
       const config = old?.config ?? publicConfig(ctx.config);
       ctx.store.put("plans", { ...old, id: date, date, config });
       const posts = ctx.store.all<Post>("posts");
@@ -229,10 +232,9 @@ function makePlans(ctx: Context, command: Command) {
       );
       const sources = new Set<string>();
       for (const p of dayPosts)
-        for (const s of ctx.store.get<any>("artifacts", p.artifactId)?.sourceIds ?? [])
-          sources.add(s);
+        for (const s of ctx.store.get("artifacts", p.artifactId)?.sourceIds ?? []) sources.add(s);
       const expected = quota(config),
-        selected: any[] = [];
+        selected: Record<string, unknown>[] = [];
       // Configuration capacity is independent of how many approved artifacts exist.
       cachedSlots(
         { ...ctx, random: () => 0 },
@@ -243,7 +245,7 @@ function makePlans(ctx: Context, command: Command) {
         -Infinity
       );
       const library = ctx.store
-        .all<any>("artifacts")
+        .all("artifacts")
         .filter(
           (a) =>
             eligible(ctx, a, dateAt(date, 1439)) &&
@@ -325,7 +327,7 @@ function exportQueueLocked(ctx: Context) {
     return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
   };
   const rows = ctx.store.all<Post>("posts").map((p) => {
-    const a = ctx.store.get<any>("artifacts", p.artifactId) ?? {};
+    const a = ctx.store.get("artifacts", p.artifactId) ?? ({} as RecordData);
     return [
       p.id,
       p.artifactId,
@@ -374,7 +376,9 @@ function exportQueueLocked(ctx: Context) {
   } catch (error) {
     try {
       unlinkSync(temp);
-    } catch {}
+    } catch {
+      // ignore temporary file cleanup failure
+    }
     ctx.store.put("meta", { id: "queue-export", stale: true, lastError: String(error) });
     return { path: target, stale: true, lastError: String(error) };
   }
@@ -383,15 +387,21 @@ async function reconcile(ctx: Context) {
   const facebook = ctx.adapters.facebook;
   for (const p of ctx.store
     .all<Post>("posts")
-    .filter((p) => ["submitting", "uncertain", "scheduled", "cancelling"].includes(p.status))) {
+    .filter(
+      (p) =>
+        ["submitting", "uncertain", "scheduled", "cancelling"].includes(p.status) &&
+        (!p.remoteKind || p.remoteKind === "page-post")
+    )) {
     if (!facebook?.reconcile) continue;
     try {
       const result = await facebook.reconcile(p);
-      if (result.status === "absent" && ["submitting", "uncertain"].includes(p.status))
+      // A missing/incomplete correlation is deliberately not absence proof.
+      // Keep it held until an authoritative, known-ID read-back resolves it.
+      if (result.status === "absent" || result.status === "unknown")
         ctx.store.put("posts", {
           ...p,
-          status: p.cancelRequested ? "cancelled" : "planned",
-          lastError: undefined,
+          status: p.status === "cancelling" ? "cancelling" : "uncertain",
+          lastError: "Remote outcome remains unknown; reconciliation is required",
         });
       else if (["scheduled", "published", "cancelled"].includes(result.status)) {
         if (result.status !== "cancelled" && !result.remoteId && !p.remoteId)
@@ -403,30 +413,17 @@ async function reconcile(ctx: Context) {
           publishedAt: result.publishedAt ?? p.publishedAt,
           lastError: undefined,
         });
-        if (result.status === "scheduled" && p.cancelRequested && facebook.cancel) {
-          const cancelling = {
-            ...p,
-            remoteId: result.remoteId ?? p.remoteId,
-            status: "cancelling" as const,
-          };
-          ctx.store.put("posts", cancelling);
-          try {
-            const cancelled = await facebook.cancel(cancelling);
-            if (cancelled.status === "cancelled")
-              ctx.store.put("posts", { ...cancelling, status: "cancelled" });
-          } catch (error) {
-            ctx.store.put("posts", { ...cancelling, lastError: String(error) });
-          }
-        }
+        // Cancellation is a separate, explicitly authorized mutation. A
+        // read-back must never turn a stale cancellation request into a write.
       }
     } catch (error) {
       ctx.store.put("posts", { ...p, lastError: String(error) });
     }
   }
 }
-async function publish(ctx: Context) {
+async function publish(ctx: Context, command: Command = { type: "publish" }) {
   await reconcile(ctx);
-  if (ctx.store.get<any>("meta", "scheduling")?.paused) return { paused: true };
+  if (ctx.store.get("meta", "scheduling")?.paused) return { paused: true };
   const fb = ctx.adapters.facebook;
   if (!fb?.bounds || !fb?.submit) throw new Error("Facebook adapter is not configured");
   const bounds = await fb.bounds(ctx.now());
@@ -439,7 +436,12 @@ async function publish(ctx: Context) {
     throw new Error("Facebook scheduling bounds are unavailable");
   for (const post of ctx.store
     .all<Post>("posts")
-    .filter((p) => p.status === "planned" && !p.cancelRequested)) {
+    .filter(
+      (p) =>
+        p.status === "planned" &&
+        !p.cancelRequested &&
+        (!command.postIds || command.postIds.includes(p.id))
+    )) {
     let p = post;
     const earliest = ctx.now().getTime() + bounds.minLeadMinutes * 60000;
     if (Date.parse(p.scheduledAt) <= earliest) {
@@ -450,7 +452,7 @@ async function publish(ctx: Context) {
           const datePosts = ctx.store
             .all<Post>("posts")
             .filter((other) => other.id !== p.id && active(other));
-          const config = ctx.store.get<any>("plans", date)?.config ?? ctx.config;
+          const config = ctx.store.get("plans", date)?.config ?? ctx.config;
           if (
             p.origin !== "custom" &&
             datePosts.filter(
@@ -458,7 +460,7 @@ async function publish(ctx: Context) {
             ).length >= quota(config)[p.kind]
           )
             continue;
-          const a = ctx.store.get<any>("artifacts", p.artifactId);
+          const a = ctx.store.get("artifacts", p.artifactId);
           if (p.origin !== "custom" && a?.topic !== config.topic) continue;
           if (
             p.kind === "video" &&
@@ -467,7 +469,7 @@ async function publish(ctx: Context) {
                 other.date === date &&
                 other.kind === "video" &&
                 ctx.store
-                  .get<any>("artifacts", other.artifactId)
+                  .get("artifacts", other.artifactId)
                   ?.sourceIds?.some((s: string) => a?.sourceIds?.includes(s))
             )
           )
@@ -477,7 +479,9 @@ async function publish(ctx: Context) {
           ctx.store.put("posts", p);
           moved = true;
           break;
-        } catch {}
+        } catch {
+          // ignore slot calculation errors
+        }
       }
       if (!moved) {
         ctx.store.put("posts", {
@@ -488,8 +492,8 @@ async function publish(ctx: Context) {
       }
     }
     if (Date.parse(p.scheduledAt) > ctx.now().getTime() + bounds.maxLeadDays * 86400000) continue;
-    if (ctx.store.get<any>("meta", "scheduling")?.paused) break;
-    const artifact = ctx.store.get<any>("artifacts", p.artifactId);
+    if (ctx.store.get("meta", "scheduling")?.paused) break;
+    const artifact = ctx.store.get("artifacts", p.artifactId);
     if (!eligible(ctx, artifact, p.scheduledAt)) {
       ctx.store.put("posts", {
         ...p,
@@ -501,13 +505,25 @@ async function publish(ctx: Context) {
     }
     ctx.store.put("posts", { ...p, status: "submitting" });
     try {
-      const result = await fb.submit({ id: p.id, artifact, scheduledAt: p.scheduledAt });
+      const authorization = command.publicationAuthorization;
+      if (
+        ctx.config.deployment?.profile === "pi-free" &&
+        (!authorization || authorization.postId !== p.id || authorization.operation !== "submit")
+      )
+        throw new Error("Publication authorization does not cover this selected post");
+      const result = await fb.submit({
+        id: p.id,
+        artifact,
+        scheduledAt: p.scheduledAt,
+        publicationAuthorization: authorization,
+      });
       if (!result.remoteId || !["scheduled", "published"].includes(result.status))
         throw new Error("Invalid Facebook submission response");
       ctx.store.put("posts", {
         ...p,
         status: result.status,
         remoteId: result.remoteId,
+        remoteKind: "page-post",
         publishedAt: result.publishedAt,
         lastError: undefined,
       });
@@ -532,10 +548,23 @@ async function cancel(ctx: Context, command: Command) {
   for (const selectedPost of selected) {
     const p = ctx.store.get<Post>("posts", selectedPost.id)!;
     if (p.status === "planned") ctx.store.put("posts", { ...p, status: "cancelled" });
-    else if (["scheduled", "cancelling"].includes(p.status) && ctx.adapters.facebook?.cancel) {
+    else if (
+      ["scheduled", "cancelling"].includes(p.status) &&
+      (ctx.config.deployment?.profile !== "pi-free" || p.remoteKind === "page-post") &&
+      ctx.adapters.facebook?.cancel
+    ) {
       ctx.store.put("posts", { ...p, status: "cancelling" });
       try {
-        const result = await ctx.adapters.facebook.cancel(p);
+        const authorization = command.publicationAuthorization;
+        if (
+          ctx.config.deployment?.profile === "pi-free" &&
+          (!authorization || authorization.postId !== p.id || authorization.operation !== "cancel")
+        )
+          throw new Error("Cancellation authorization does not cover this selected post");
+        const result = await ctx.adapters.facebook.cancel({
+          ...p,
+          publicationAuthorization: authorization,
+        });
         if (result.status === "cancelled") ctx.store.put("posts", { ...p, status: "cancelled" });
       } catch (error) {
         ctx.store.put("posts", { ...p, status: "cancelling", lastError: String(error) });
@@ -544,14 +573,15 @@ async function cancel(ctx: Context, command: Command) {
   }
   return { posts: ctx.store.all("posts") };
 }
-async function runPlanning(ctx: Context, command: Command): Promise<unknown> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function runPlanning(ctx: Context, command: Command): Promise<any> {
   if (command.type === "coverage") return coverage(ctx, command);
   if (command.type === "export-queue") return exportQueue(ctx);
   let result: unknown;
   switch (command.type) {
     case "plan": {
       const changed = ctx.store
-        .all<any>("plans")
+        .all("plans")
         .some(
           (p) =>
             p.date > today(ctx) &&
@@ -572,7 +602,7 @@ async function runPlanning(ctx: Context, command: Command): Promise<unknown> {
       result = ctx.store.put("meta", { id: "scheduling", paused: command.paused });
       break;
     case "publish":
-      result = await publish(ctx);
+      result = await publish(ctx, command);
       break;
     case "reconcile":
       await reconcile(ctx);
@@ -597,7 +627,7 @@ async function runPlanning(ctx: Context, command: Command): Promise<unknown> {
               status: "cancelled",
               lastError: "Superseded by configuration rebuild",
             });
-        for (const plan of ctx.store.all<any>("plans"))
+        for (const plan of ctx.store.all("plans"))
           if (plan.date > today(ctx))
             ctx.store.put("plans", { ...plan, config: publicConfig(ctx.config) });
       });
@@ -609,7 +639,7 @@ async function runPlanning(ctx: Context, command: Command): Promise<unknown> {
     }
     case "schedule-custom": {
       result = ctx.store.transaction(() => {
-        const a = ctx.store.get<any>("artifacts", command.artifactId);
+        const a = ctx.store.get("artifacts", command.artifactId);
         if (!a || a.origin !== "custom" || !eligible(ctx, a))
           throw new Error("An approved custom artifact is required");
         const posts = ctx.store.all<Post>("posts");
@@ -640,13 +670,14 @@ async function runPlanning(ctx: Context, command: Command): Promise<unknown> {
 }
 
 /** Fence asynchronous external actions across coordinators; SQLite owns the lease. */
-export async function planning(ctx: Context, command: Command): Promise<unknown> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function planning(ctx: Context, command: Command): Promise<any> {
   if (["coverage", "export-queue", "pause"].includes(command.type))
     return runPlanning(ctx, command);
   const owner = ctx.id(),
     key = "planning-lease";
   ctx.store.transaction(() => {
-    const previous = ctx.store.get<any>("meta", key);
+    const previous = ctx.store.get("meta", key);
     if (previous?.owner && Date.parse(previous.until) > ctx.now().getTime())
       throw new Error("Planning/publication cycle already owned by another worker");
     ctx.store.put("meta", {
@@ -656,7 +687,7 @@ export async function planning(ctx: Context, command: Command): Promise<unknown>
     });
   });
   const owned = () => {
-    if (ctx.store.get<any>("meta", key)?.owner !== owner)
+    if (ctx.store.get("meta", key)?.owner !== owner)
       throw new Error("Planning/publication ownership lost");
   };
   // A proxy checks ownership both before and after each remote await, including errors.
@@ -667,7 +698,7 @@ export async function planning(ctx: Context, command: Command): Promise<unknown>
           .filter((name) => typeof facebook[name] === "function")
           .map((name) => [
             name,
-            async (...args: any[]) => {
+            async (...args: unknown[]) => {
               owned();
               try {
                 const result = await facebook[name](...args);
@@ -685,7 +716,7 @@ export async function planning(ctx: Context, command: Command): Promise<unknown>
     get(target, prop) {
       const value = Reflect.get(target, prop);
       if (typeof value !== "function") return value;
-      return (...args: any[]) => {
+      return (...args: unknown[]) => {
         owned();
         return value.apply(target, args);
       };
@@ -694,7 +725,7 @@ export async function planning(ctx: Context, command: Command): Promise<unknown>
   const timer = setInterval(
     () => {
       ctx.store.transaction(() => {
-        if (ctx.store.get<any>("meta", key)?.owner === owner)
+        if (ctx.store.get("meta", key)?.owner === owner)
           ctx.store.put("meta", {
             id: key,
             owner,
@@ -713,7 +744,7 @@ export async function planning(ctx: Context, command: Command): Promise<unknown>
   } finally {
     clearInterval(timer);
     ctx.store.transaction(() => {
-      if (ctx.store.get<any>("meta", key)?.owner === owner)
+      if (ctx.store.get("meta", key)?.owner === owner)
         ctx.store.put("meta", { id: key, owner: null, until: ctx.now().toISOString() });
     });
   }
