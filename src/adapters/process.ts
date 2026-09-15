@@ -150,7 +150,9 @@ export class ProcessAdapter implements OperationAdapter {
         if (finished) return;
         clearTimeout(timer);
         output += decoder.end();
-        stop();
+        // `close` means this child has already exited.  Signalling its pid at
+        // this point can race with pid reuse and kill an unrelated later
+        // adapter process, which in turn corrupts otherwise valid responses.
         if (code !== 0)
           return fail(
             new AdapterError(

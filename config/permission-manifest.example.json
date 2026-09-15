@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "submissionId": "replace-with-new-submission-id",
+  "sourceId": "true-original-source-id",
+  "originalUrl": "https://example.invalid/original-video",
+  "title": "Accurate original title",
+  "language": "bn",
+  "videoFile": "video.mp4",
+  "permission": {
+    "evidenceFile": "permission-evidence.pdf",
+    "scope": ["edit", "facebook"],
+    "restrictions": []
+  }
+}

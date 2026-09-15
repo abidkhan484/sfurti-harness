@@ -1,9 +1,11 @@
 import { randomUUID, createHash } from "node:crypto";
 import { readFileSync, mkdirSync, statfsSync, statSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { Store } from "./store.ts";
+import { Store, type RecordData } from "./store.ts";
 import { loadConfig, type Config } from "./config.ts";
 import { today, type Command, type Context } from "./types.ts";
+import { parseSetupReceipt } from "./deployment/contracts.ts";
+import { assertSourcePermission, fileIntegrity } from "./domain.ts";
 
 export interface HarnessOptions {
   config?: Partial<Config> | Record<string, unknown>;
@@ -135,11 +137,24 @@ export function createHarness(options: HarnessOptions = {}) {
   function eligiblePublication(post: Record<string, unknown>, artifact: Record<string, unknown>) {
     // Planning repeats the same integrity/permission gate at dispatch; this
     // fast path ensures authorization is never minted for a stale artifact.
-    return (
-      artifact.status === "approved" &&
-      (artifact.versions as Record<string, unknown>[])?.at(-1)?.integrity &&
-      typeof post.scheduledAt === "string"
-    );
+    const version = (artifact.versions as Record<string, unknown>[])?.at(-1);
+    if (
+      artifact.status !== "approved" ||
+      !version?.integrity ||
+      typeof artifact.filePath !== "string" ||
+      typeof post.scheduledAt !== "string"
+    )
+      return false;
+    try {
+      fileIntegrity(artifact.filePath, version.integrity, true);
+      for (const sourceId of Array.isArray(artifact.sourceIds) ? artifact.sourceIds : [])
+        assertSourcePermission(store.get("sources", sourceId), ctx.now(), {
+          requireStoredIntegrity: true,
+        });
+      return true;
+    } catch {
+      return false;
+    }
   }
   function snapshot() {
     return store.transaction(() => {
@@ -180,6 +195,10 @@ export function createHarness(options: HarnessOptions = {}) {
           command.pageId !== configuredPageId()
         )
           throw new Error("Live publication activation requires explicit Page confirmation");
+        const { maintenance } = await import("./maintenance.ts");
+        const readiness = await maintenance(ctx, { type: "doctor" });
+        if (!readiness.ready)
+          throw new Error("Live publication activation requires current Pi readiness");
         return store.put("meta", {
           id: "publication-activation",
           active: true,
@@ -286,6 +305,7 @@ export function createHarness(options: HarnessOptions = {}) {
             "recommendations",
             "qualifications",
             "telegram_updates",
+            "service_tasks",
           ].map((name) => [name, store.all(name)])
         );
       case "pending-sources":
@@ -411,12 +431,58 @@ export function createHarness(options: HarnessOptions = {}) {
         writeFileSync(path, JSON.stringify(postingWindowsExample, null, 2) + "\n", { mode: 0o600 });
         return { path, created: true };
       }
+      case "setup-init": {
+        if (config.deployment?.profile !== "pi-free")
+          throw new Error("setup-init is available only for the Pi profile");
+        const { existsSync, mkdirSync, writeFileSync } = await import("node:fs");
+        const { dirname } = await import("node:path");
+        const { postingWindowsExample } = await import("./deployment/posting-windows.ts");
+        const windowsPath = config.posting.windowsFile;
+        const inboxPath = config.deployment.intake.path;
+        const created: string[] = [];
+        mkdirSync(inboxPath, { recursive: true, mode: 0o700 });
+        if (!existsSync(windowsPath)) {
+          mkdirSync(dirname(windowsPath), { recursive: true, mode: 0o700 });
+          writeFileSync(windowsPath, JSON.stringify(postingWindowsExample, null, 2) + "\n", {
+            mode: 0o600,
+          });
+          created.push(windowsPath);
+        }
+        return {
+          created,
+          inboxPath,
+          configTemplate: "config/harness.pi-free.example.json",
+          permissionTemplate: "config/permission-manifest.example.json",
+          missingHumanSteps: [
+            "Copy and edit the non-secret Pi configuration without embedding tokens.",
+            "Create private token files and complete local ChatGPT login outside this command.",
+            "Replace provisional posting-window evidence with actual operator/Page evidence.",
+          ],
+        };
+      }
       case "setup-attest": {
         if (typeof command.artifactId !== "string")
           throw new Error("setup-attest requires an artifactId");
-        const { sampleIsCurrent, readinessFingerprint } = await import("./deployment/readiness.ts");
+        const { sampleIsCurrent, readinessFingerprint, toolManifestHash } = await import(
+          "./deployment/readiness.ts"
+        );
         const sample = sampleIsCurrent(ctx, command.artifactId);
         if (!sample.ok) throw new Error(`setup-attest ${sample.reason}`);
+        const nativeReceipt = store.all("setup_receipts").some((value) => {
+          try {
+            const receipt = parseSetupReceipt(value);
+            return (
+              receipt.target === "local" &&
+              receipt.kind === "native-tool" &&
+              receipt.outcome === "passed" &&
+              receipt.configFingerprint === readinessFingerprint(ctx) &&
+              receipt.toolManifestHash === toolManifestHash(ctx)
+            );
+          } catch {
+            return false;
+          }
+        });
+        if (!nativeReceipt) throw new Error("setup-attest requires current real native-tool receipt");
         const { fileIntegrity } = await import("./domain.ts");
         fileIntegrity(sample.artifact.filePath, sample.version.integrity, true);
         return store.put("meta", {
@@ -457,10 +523,54 @@ export function createHarness(options: HarnessOptions = {}) {
         if (!artifact || artifact.status !== "approved" || !artifact.filePath)
           throw new Error("setup-send requires one approved selected artifact");
         if (!ctx.adapters.delivery) throw new Error("Private Telegram delivery is not configured");
-        await ctx.adapters.delivery.send(
-          { type: "setup-send", artifactId: artifact.id, artifactPaths: [artifact.filePath] },
-          { idempotencyKey: `setup-send:${command.requestId}` }
-        );
+        const version = artifact.versions?.at(-1);
+        const { fileIntegrity } = await import("./domain.ts");
+        fileIntegrity(artifact.filePath, version?.integrity, true);
+        const journalId = `setup-send:${command.requestId}`;
+        const previous = store.get("operation_journals", journalId);
+        const requestFingerprint = `${artifact.id}:${version.integrity.sha256}`;
+        if (previous && previous.requestFingerprint !== requestFingerprint)
+          throw new Error("setup-send request ID belongs to a different selected artifact");
+        if (previous?.phase === "confirmed") return previous.result;
+        if (previous?.uncertainty)
+          throw new Error("setup-send is held for Telegram reconciliation; do not resend automatically");
+        store.put("operation_journals", {
+          id: journalId,
+          operationId: journalId,
+          destinationIdentity: "configured-private-operator",
+          selectedArtifactHash: version.integrity.sha256,
+          phase: "intent",
+          requestFingerprint,
+          attempt: (previous?.attempt ?? 0) + 1,
+          remoteIds: [],
+          lastConfirmedState: "none",
+          uncertainty: false,
+        });
+        try {
+          await ctx.adapters.delivery.send(
+            { type: "setup-send", artifactId: artifact.id, artifactPaths: [artifact.filePath] },
+            { idempotencyKey: journalId }
+          );
+        } catch (error) {
+          store.put("operation_journals", {
+            ...store.get("operation_journals", journalId),
+            id: journalId,
+            phase: "unknown",
+            uncertainty: true,
+            lastConfirmedState: "unknown",
+            lastError: String(error),
+          });
+          throw error;
+        }
+        const result = { artifactId: artifact.id, queued: false, sent: true };
+        store.put("operation_journals", {
+          ...store.get("operation_journals", journalId),
+          id: journalId,
+          phase: "confirmed",
+          uncertainty: false,
+          lastConfirmedState: "sent",
+          result,
+        });
         const { readinessFingerprint } = await import("./deployment/readiness.ts");
         store.put("setup_receipts", {
           id: `setup-send:${command.requestId}`,
@@ -472,19 +582,20 @@ export function createHarness(options: HarnessOptions = {}) {
           configFingerprint: readinessFingerprint(ctx),
           identityFingerprint: "telegram",
           artifactId: artifact.id,
-          artifactVersion: String(artifact.versions?.at(-1)?.number ?? 0),
-          artifactSha256: artifact.versions?.at(-1)?.integrity?.sha256,
+          artifactVersion: String(version.number ?? 0),
+          artifactSha256: version.integrity.sha256,
           evidencePaths: [],
           limitations: [],
         });
-        return { artifactId: artifact.id, queued: false, sent: true };
+        return result;
       }
       case "setup-probe": {
         if (
           !["codex", "search", "facebook"].includes(command.target) ||
-          typeof command.requestId !== "string"
+          (command.requestId !== undefined && typeof command.requestId !== "string")
         )
-          throw new Error("setup-probe requires target codex/search/facebook and requestId");
+          throw new Error("setup-probe requires target codex/search/facebook");
+        const probeRequestId = command.requestId ?? ctx.id();
         const adapter =
           command.target === "facebook"
             ? ctx.adapters.facebook
@@ -496,6 +607,10 @@ export function createHarness(options: HarnessOptions = {}) {
           try {
             if (command.target === "facebook" && typeof adapter.probe === "function") {
               await adapter.probe();
+            } else if (command.target === "codex" && typeof adapter.probe === "function") {
+              const model = Object.values(config.llm.taskModels)[0]?.model;
+              if (typeof model !== "string") throw new Error("Codex has no configured task model");
+              await adapter.probe(model);
             } else if (typeof adapter.probe === "function") {
               await adapter.probe();
             } else throw new Error("adapter has no explicit bounded probe");
@@ -512,7 +627,7 @@ export function createHarness(options: HarnessOptions = {}) {
               ? "codex-inference"
               : "search";
         return store.put("setup_receipts", {
-          id: `probe:${command.target}:${command.requestId}`,
+          id: `probe:${command.target}:${probeRequestId}`,
           schemaVersion: 1,
           target: command.target,
           kind,
@@ -528,6 +643,10 @@ export function createHarness(options: HarnessOptions = {}) {
       case "setup-sample": {
         if (typeof command.sourceId !== "string" || typeof command.requestId !== "string")
           throw new Error("setup-sample requires sourceId and requestId");
+        const setupJobId = `setup-sample:${command.requestId}`;
+        const previous = store.get("jobs", setupJobId);
+        if (previous && previous.command?.sourceId !== command.sourceId)
+          throw new Error("setup-sample request ID belongs to a different source");
         const source = store.get("sources", command.sourceId);
         if (
           !source ||
@@ -537,6 +656,28 @@ export function createHarness(options: HarnessOptions = {}) {
           !source.metadata.segments.length
         )
           throw new Error("setup-sample requires one cleared qualified source with intervals");
+        const { assertSourcePermission } = await import("./domain.ts");
+        assertSourcePermission(source, ctx.now(), { requireStoredIntegrity: true });
+        const candidateSets: Array<Array<{ startMs: number; endMs: number }>> = Array.isArray(
+          source.metadata.candidateSets
+        )
+          ? source.metadata.candidateSets
+          : [source.metadata.segments];
+        const used = store
+          .all("artifacts")
+          .filter((artifact) => artifact.sourceIds?.includes(source.id))
+          .flatMap((artifact) => artifact.segments ?? []);
+        const selected = candidateSets.find(
+          (set: Array<{ startMs: number; endMs: number }>) =>
+            Array.isArray(set) &&
+            set.length &&
+            !set.some((segment: { startMs: number; endMs: number }) =>
+              used.some(
+                (other) => segment.startMs < other.endMs && other.startMs < segment.endMs
+              )
+            )
+        );
+        if (!selected) throw new Error("setup-sample has no unused qualified interval set");
         const coordinator = await import("./coordinator.ts");
         return coordinator.request(
           ctx,
@@ -545,7 +686,7 @@ export function createHarness(options: HarnessOptions = {}) {
             requestId: `setup-sample:${command.requestId}`,
             videos: 1,
             sourceId: source.id,
-            segments: [source.metadata.segments[0]],
+            segments: selected,
             topic: source.metadata.topic ?? config.topic,
             schedule: false,
           },
@@ -555,30 +696,99 @@ export function createHarness(options: HarnessOptions = {}) {
       case "setup-benchmark": {
         if (typeof command.requestId !== "string")
           throw new Error("setup-benchmark requires requestId");
+        if (config.deployment?.profile !== "pi-free" || config.deployment.executionMode !== "preview")
+          throw new Error("setup-benchmark is available only in Pi preview mode");
+        const benchmarkId = `setup-benchmark:${command.requestId}`;
+        const existingBenchmark = store.get("meta", benchmarkId);
+        if (existingBenchmark?.result?.status === "complete") return existingBenchmark;
+        const qualifiedSources = store
+          .all("sources")
+          .filter(
+            (source) =>
+              source.status === "cleared" &&
+              source.metadata?.qualified === true &&
+              Array.isArray(source.metadata?.segments) &&
+              source.metadata.segments.length
+          );
+        if (new Set(qualifiedSources.map((source) => source.id)).size < 3)
+          throw new Error("setup-benchmark requires three distinct cleared qualified sources");
         const coordinator = await import("./coordinator.ts");
         const startedAt = ctx.now().toISOString();
-        const result = await coordinator.request(
-          ctx,
-          {
-            type: "request",
-            requestId: `setup-benchmark:${command.requestId}`,
-            videos: 3,
-            images: 1,
-            texts: 1,
-            topic: config.topic,
-            schedule: false,
-          },
-          execute
+        const startedMs = ctx.now().getTime();
+        const before = statfsSync(config.storage.mediaDirectory);
+        const beforeFreeBytes = before.bavail * before.bsize;
+        const memoryBefore = process.memoryUsage().rss;
+        const activeId = `setup-benchmark-active:${command.requestId}`;
+        store.put("meta", {
+          id: "setup-benchmark-active",
+          activeId,
+          requestId: command.requestId,
+          startedAt,
+          // A crashed process cannot pause normal work indefinitely.
+          leaseUntil: new Date(ctx.now().getTime() + config.limits.taskTimeoutMs).toISOString(),
+        });
+        let result: RecordData;
+        try {
+          result = (await coordinator.request(
+            ctx,
+            {
+              type: "request",
+              requestId: `setup-benchmark:${command.requestId}`,
+              videos: 3,
+              images: 1,
+              texts: 1,
+              topic: config.topic,
+              schedule: false,
+              isolatedBenchmark: true,
+              benchmarkSourceIds: qualifiedSources.slice(0, 3).map((source) => source.id),
+            },
+            execute
+          )) as RecordData;
+        } finally {
+          if (store.get("meta", "setup-benchmark-active")?.activeId === activeId)
+            store.remove("meta", "setup-benchmark-active");
+        }
+        const after = statfsSync(config.storage.mediaDirectory);
+        const artifacts: RecordData[] = ((result.artifactIds ?? []) as string[])
+          .map((id: string) => store.get("artifacts", id))
+          .filter((artifact): artifact is RecordData => artifact !== undefined);
+        const stages = Array.isArray(result.benchmarkStages) ? result.benchmarkStages : [];
+        const outputBytes = stages.reduce(
+          (total: number, stage: RecordData) => total + Number(stage.outputBytes ?? 0),
+          0
+        );
+        const minFreeBytes = Math.max(
+          config.limits.minFreeBytes,
+          config.deployment.storageBudget.minFreeBytes
         );
         return store.put("meta", {
-          id: `setup-benchmark:${command.requestId}`,
+          id: benchmarkId,
           requestId: command.requestId,
           isolated: true,
           startedAt,
           completedAt: ctx.now().toISOString(),
           result,
+          measurements: {
+            elapsedMs: Math.max(0, ctx.now().getTime() - startedMs),
+            peakRssBytes: Math.max(memoryBefore, process.memoryUsage().rss),
+            diskGrowthBytes: Math.max(0, beforeFreeBytes - after.bavail * after.bsize),
+            approvedArtifacts: artifacts.filter((artifact) => artifact.status === "approved").length,
+            deferredArtifacts: artifacts.filter((artifact) => artifact.status === "deferred").length,
+            failedArtifacts: artifacts.filter((artifact) => artifact.status === "failed").length,
+            stages,
+            quotaRecords: stages.filter((stage: RecordData) => stage.quota !== "not-deferred"),
+            storageProjection: {
+              packageOutputBytes: outputBytes,
+              freeBytesAfter: after.bavail * after.bsize,
+              protectedFreeBytes: minFreeBytes,
+              additionalPackagesAtObservedSize:
+                outputBytes > 0
+                  ? Math.max(0, Math.floor((after.bavail * after.bsize - minFreeBytes) / outputBytes))
+                  : null,
+            },
+          },
           limitations: [
-            "Preview benchmark is not daily coverage and requires three cleared qualified sources for video success.",
+            "Preview benchmark runs only its isolated 3/1/1 custom job, is not daily coverage, and requires three cleared qualified sources for video success.",
           ],
         });
       }

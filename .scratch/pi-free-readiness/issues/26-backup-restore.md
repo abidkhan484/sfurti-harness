@@ -31,12 +31,14 @@ Implement only this ticket after dependencies have completion evidence. Keep unr
 
 ## Completion record
 
-- Implementation result: partial fixture implementation. Backup includes a media file checksum inventory and selected durable row counts; restore verification copies only into a new directory, validates database/file hashes, and reports that restored remote state requires reconciliation.
+- Implementation result: completed local backup/restore verification. Backup makes a consistent SQLite copy, inventories checksummed managed media plus referenced source/artifact/qualification/review/receipt evidence outside media, excludes configuration/auth data, and records durable lineage row counts. Restore copies only into a new isolated destination and validates the database checksum/schema, row counts, and each retained file before reporting reconciliation required.
 - Changed files: src/maintenance.ts; src/app.ts; test/pi-backup.test.ts
-- Tests and actual results: focused backup test passed as part of the 3/3 command recorded in ticket 21; `npm run typecheck` passed.
+- Tests and actual results: `node --test test/pi-backup.test.ts` passed (1/1); `npm run typecheck` passed; `git diff --check` passed.
 - Native ARM64 or external verification: not performed
-- Remaining blockers/limitations: all referenced lineage classes, peak-space admission, schema/reference validation, and on-device restore remain incomplete/unverified.
+- Remaining blockers/limitations: fixture verification cannot establish the target device's free space or separate-device durability. Restore deliberately does not overwrite a runtime or rehydrate private auth/secrets; the operator must reauthenticate and reconcile remote state before any submission.
 
 ## Comments
 
 Created from the agreed Pi/free-service deployment requirements; not executed during specification.
+
+2026-09-15: Completed local fixture coverage including external retained review/receipt evidence. No original/approved media, credential, or runtime database was overwritten or deleted.

@@ -34,7 +34,10 @@ export async function enqueueNotification(ctx: Context, event: unknown) {
         attempts: 0,
       });
   });
-  await drainNotifications(ctx, id);
+  // Preview records operator-facing work locally.  A setup-send is the only
+  // explicit outbound action during first-sample setup.
+  if (!(ctx.config.deployment?.profile === "pi-free" && ctx.config.deployment.executionMode === "preview"))
+    await drainNotifications(ctx, id);
 }
 
 /** Transports must deduplicate idempotencyKey when a response is lost after delivery. */

@@ -85,3 +85,22 @@ test("discovery records partial coverage for disabled JSON or rate limiting with
   assert.equal(result.recommendations.length, 0);
   assert.equal(result.coverage.partial, true);
 });
+
+test("explicit discovery probe performs one bounded read", async () => {
+  let calls = 0;
+  const adapter = new LocalDiscovery({
+    endpoint: "http://searx.test",
+    queriesPerBatch: 1,
+    resultsPerQuery: 1,
+    maxRecommendationsPerTopic: 1,
+    minRequestSpacingMs: 0,
+    transport: {
+      request: async () => {
+        calls++;
+        return { status: 200, body: JSON.stringify({ results: [] }) };
+      },
+    },
+  });
+  assert.deepEqual(await adapter.probe(), { partial: false, hitCount: 0 });
+  assert.equal(calls, 1);
+});

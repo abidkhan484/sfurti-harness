@@ -31,12 +31,14 @@ Implement only this ticket after dependencies have completion evidence. Keep unr
 
 ## Completion record
 
-- Implementation result: partial local packaging hardening: Compose remains arm64/private and starts doctor, mounts configured posting windows read-only, and uses no-new-privileges; an initial Pi runbook documents the local-only boundaries.
-- Changed files: docker-compose.pi-free.yml; docs/setup-pi.md; test/pi-packaging.test.ts
-- Tests and actual results: not yet included in the final unrestricted suite rerun.
+- Implementation result: completed local packaging/runbook implementation. Compose remains ARM64/private, unprivileged, and defaults to doctor with exact windows/tool/inbox/auth/secret mounts. `setup-init` creates only missing local inbox/windows scaffolding and reports the remaining human credential/login/evidence steps; shipped Pi config and permission templates contain references/placeholders only. The isolated 3/1/1 preview benchmark binds three video slots to distinct cleared sources, pauses ordinary work with an expiring marker, and records per-item timing/RSS/output/quota plus storage projection.
+- Changed files: docker-compose.pi-free.yml; config/harness.pi-free.example.json; config/permission-manifest.example.json; src/app.ts; src/cli.ts; src/coordinator.ts; docs/setup-pi.md; operator-first-test.md; test/pi-packaging.test.ts; test/pi-benchmark.test.ts
+- Tests and actual results: `node src/cli.ts help` confirmed `setup-init`, benchmark, and selected-publication command help; `node --test test/pi-packaging.test.ts test/pi-benchmark.test.ts` passed (2/2); `npm run typecheck` passed; `git diff --check` passed.
 - Native ARM64 or external verification: not performed
-- Remaining blockers/limitations: no ARM64 build, real Pi, operator media, account probe, or benchmark was performed; non-destructive init/benchmark workflow remains incomplete.
+- Remaining blockers/limitations: no ARM64 build, real Pi, operator media, account probe, or benchmark was performed. The runbook labels these as operator-only evidence and does not claim them from fixtures.
 
 ## Comments
 
 Created from the agreed Pi/free-service deployment requirements; not executed during specification.
+
+2026-09-15: Completed local setup scaffolding and documentation without reading/writing credentials, running Docker, or changing an existing local configuration file.

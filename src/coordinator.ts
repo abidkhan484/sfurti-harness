@@ -50,11 +50,28 @@ export async function request(ctx: Context, command: Command, execute: Execute) 
     });
   if (job.status === "complete") return job;
   // Tick is the single serialized workload owner; custom work remains separate from daily targets.
-  await tick(ctx, { type: "tick", customOnly: true }, execute);
+  await tick(
+    ctx,
+    {
+      type: "tick",
+      customOnly: true,
+      // A benchmark is intentionally the sole custom workload considered by
+      // its tick.  It must not accidentally drain ordinary queued work.
+      isolatedJobId: command.isolatedBenchmark === true ? id : undefined,
+    },
+    execute
+  );
   return ctx.store.get("jobs", id);
 }
 
 export async function tick(ctx: Context, command: Command, execute: Execute) {
+  const activeBenchmark = ctx.store.get("meta", "setup-benchmark-active");
+  if (
+    command.isolatedJobId === undefined &&
+    activeBenchmark &&
+    Date.parse(activeBenchmark.leaseUntil) > ctx.now().getTime()
+  )
+    return { status: "paused-for-setup-benchmark", produced: 0, attempted: 0 };
   const owner = ctx.id();
   const id = "coordinator";
   const acquired = ctx.store.transaction(() => {
@@ -101,22 +118,61 @@ export async function tick(ctx: Context, command: Command, execute: Execute) {
   try {
     const pending = ctx.store
       .all("jobs")
-      .filter((j) => j.origin === "custom" && ["pending", "running"].includes(j.status));
+      .filter(
+        (j) =>
+          j.origin === "custom" &&
+          ["pending", "running"].includes(j.status) &&
+          (command.isolatedJobId === undefined || j.id === command.isolatedJobId)
+      );
     for (const job of pending) {
       guardedRenew();
       const results = [];
-      for (const kind of Object.keys(kinds) as Array<keyof typeof kinds>) {
+      const benchmarkStages: Record<string, unknown>[] = Array.isArray(job.benchmarkStages)
+        ? job.benchmarkStages
+        : [];
+      // Text and image remain independently actionable when video sources,
+      // quota, or native capacity are scarce.  Video is deliberately last.
+      for (const kind of ["image", "text", "video"] as Array<keyof typeof kinds>) {
         for (let index = 0; index < job.counts[kind]; index++) {
           if (attempted >= ctx.config.limits.maxTasksPerTick) break;
           attempted++;
+          const startedAt = ctx.now().toISOString();
+          const startedMs = ctx.now().getTime();
+          const rssBeforeBytes = process.memoryUsage().rss;
+          const sourceId =
+            kind === "video" && Array.isArray(job.command.benchmarkSourceIds)
+              ? job.command.benchmarkSourceIds[index]
+              : job.command.sourceId;
+          const source = typeof sourceId === "string" ? ctx.store.get("sources", sourceId) : undefined;
           const artifact = await production(ctx, {
             ...job.command,
             type: "produce",
             origin: "custom",
             kind,
             requestId: `${job.id}:${kind}:${index}`,
+            sourceId,
+            segments: sourceId ? source?.metadata?.segments : job.command.segments,
           });
           results.push(artifact.id);
+          if (job.command.isolatedBenchmark === true) {
+            const outputBytes = Number(artifact.versions?.at(-1)?.integrity?.bytes ?? 0);
+            benchmarkStages.push({
+              id: `${kind}:${index}`,
+              kind,
+              sourceId: sourceId ?? null,
+              startedAt,
+              completedAt: ctx.now().toISOString(),
+              elapsedMs: Math.max(0, ctx.now().getTime() - startedMs),
+              rssBeforeBytes,
+              rssAfterBytes: process.memoryUsage().rss,
+              peakRssBytes: Math.max(rssBeforeBytes, process.memoryUsage().rss),
+              outputBytes: Number.isSafeInteger(outputBytes) && outputBytes >= 0 ? outputBytes : 0,
+              status: artifact.status,
+              quota: artifact.reason === "codex-quota" || artifact.lastError?.match(/quota|rate.?limit/i)
+                ? "deferred"
+                : "not-deferred",
+            });
+          }
           if (artifact.status === "approved") {
             produced++;
             if (job.command.schedule === true)
@@ -143,6 +199,7 @@ export async function tick(ctx: Context, command: Command, execute: Execute) {
           ...job,
           status: complete ? "complete" : "pending",
           artifactIds: artifacts.map((a) => a.id),
+          benchmarkStages,
         });
       });
     }
@@ -216,7 +273,9 @@ export async function tick(ctx: Context, command: Command, execute: Execute) {
       const isToday = day.date === today(ctx);
       if (isToday && !dailyDue) continue;
       const effective = isToday ? snapshot!.config : ctx.config;
-      for (const kind of Object.keys(kinds) as Array<keyof typeof kinds>) {
+      // Text and image remain independently actionable when video sources,
+      // quota, or native capacity are scarce. Video is deliberately last.
+      for (const kind of ["image", "text", "video"] as Array<keyof typeof kinds>) {
         const accepted = allArtifacts.filter(
           (a) =>
             a.date === day.date &&
@@ -283,8 +342,12 @@ export async function tick(ctx: Context, command: Command, execute: Execute) {
           );
           refreshSnapshots();
           if (artifact.status === "approved") produced++;
-          if (artifact.status === "deferred")
-            return { status: "deferred", produced, attempted, reason: artifact.reason };
+          if (artifact.status === "deferred") {
+            failures.push(`${artifact.id}: ${artifact.reason ?? "deferred"}`);
+            // A blocked video/Codex stage must not consume this opportunity's
+            // image and text work.
+            continue;
+          }
           if (artifact.status === "failed") failures.push(`${artifact.id}: ${artifact.lastError}`);
         }
       }

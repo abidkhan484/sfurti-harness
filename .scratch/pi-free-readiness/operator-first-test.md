@@ -37,7 +37,13 @@ Expect ARM64/aarch64 and 64-bit userspace for this profile. If these show a diff
 
 The following commands are TARGET commands specified for implementation. They are not runnable against the current baseline. Ticket 28 must replace any discrepancy with verified CLI commands before handoff.
 
-The implementation provides docker-compose.pi-free.yml, a non-secret config/harness.pi.example.json, a permission manifest template and setup instructions in docs/setup-pi.md. Configure local settings without replacing existing files; keep preview mode, current quotas and research disabled. Keep current named volumes. Set private credential file paths and readable ownership for the container's unprivileged user. Initialize the source inbox at ./data/inbox.
+The implementation provides docker-compose.pi-free.yml, `config/harness.pi-free.example.json`, `config/permission-manifest.example.json`, and setup instructions in docs/setup-pi.md. Configure local settings without replacing existing files; keep preview mode, current quotas and research disabled. Keep current named volumes. Set private credential file paths and readable ownership for the container's unprivileged user. Initialize the source inbox and a missing posting-windows template with:
+
+```sh
+docker compose -f docker-compose.pi-free.yml run --rm sfurti command --json '{"type":"setup-init"}'
+```
+
+This never creates credentials, requests tokens, logs in, or overwrites an existing local file.
 
 Complete Codex login using the installed pinned CLI in the documented dedicated auth location. For a headless Pi, the documented device-code flow may be used if available on the account. The implementation runbook must provide the exact host/container command and ownership; do not assume a workstation auth path works inside Docker. [Official authentication guidance](https://learn.chatgpt.com/docs/auth).
 

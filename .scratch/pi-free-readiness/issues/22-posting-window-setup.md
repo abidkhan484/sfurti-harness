@@ -31,12 +31,14 @@ Implement only this ticket after dependencies have completion evidence. Keep unr
 
 ## Completion record
 
-- Implementation result: partial fixture implementation. One shared strict Pi windows parser validates timezone, research evidence/date/limitations, same-day non-overlap, and positive spacing; planner preserves old inline legacy compatibility. `setup-posting-windows` creates only a missing template.
-- Changed files: src/deployment/posting-windows.ts; src/planning.ts; src/maintenance.ts; src/app.ts; test/pi-posting-windows.test.ts
-- Tests and actual results: focused parser test passed as part of the 3/3 command recorded in ticket 21; `npm run typecheck` passed.
+- Implementation result: completed local implementation. One shared strict Pi windows parser validates timezone, research evidence/date/limitations, same-day non-overlap, and positive spacing; doctor now reports remaining capacity against existing local/remote schedules and elapsed windows, while planner preserves old inline legacy compatibility. `setup-posting-windows` creates only a missing template.
+- Changed files: src/deployment/posting-windows.ts; src/planning.ts; src/maintenance.ts; src/app.ts; test/pi-posting-windows.test.ts; posting-window-research.md
+- Tests and actual results: `node --test test/pi-posting-windows.test.ts test/pi-doctor.test.ts` passed (2/2); `npm run typecheck` passed; `git diff --check` passed.
 - Native ARM64 or external verification: not performed
-- Remaining blockers/limitations: no Bangladesh audience research or Page observation was performed; five-slot capacity integration and operator evidence remain to be completed.
+- Remaining blockers/limitations: `.scratch/pi-free-readiness/posting-window-research.md` records a weak Bangladesh-local provisional hypothesis and its limitations. The operator's dated Page-specific observations remain required before any engagement/optimality claim; no account research or Page observation was performed.
 
 ## Comments
 
 Created from the agreed Pi/free-service deployment requirements; not executed during specification.
+
+2026-09-15: Completed local parser/capacity work and recorded provisional research without claiming a universal or optimal time. No Page, token, or external publication action was performed.

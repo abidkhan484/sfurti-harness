@@ -9,6 +9,7 @@ test("Pi preview rejects every Facebook mutation entry point before the adapter"
   const root = await mkdtemp(join(tmpdir(), "sfurti-publication-gate-"));
   try {
     let calls = 0;
+    let deliveryCalls = 0;
     const app = createHarness({
       config: {
         storage: { databasePath: join(root, "db.sqlite"), mediaDirectory: root },
@@ -25,12 +26,18 @@ test("Pi preview rejects every Facebook mutation entry point before the adapter"
             return {};
           },
         },
+        delivery: {
+          send: async () => {
+            deliveryCalls++;
+          },
+        },
       },
     });
     await assert.rejects(app.execute({ type: "publish" }), /preview/);
     await assert.rejects(app.execute({ type: "cancel" }), /preview/);
     await app.execute({ type: "service-cycle" });
     assert.equal(calls, 0);
+    assert.equal(deliveryCalls, 0);
     app.close();
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -55,12 +62,10 @@ test("Pi continuous publication needs a separate explicit activation", async () 
       } as never,
     });
     await assert.rejects(app.execute({ type: "publish" }), /not activated/);
-    const activation = (await app.execute({
-      type: "activate-publication",
-      pageId: "page",
-      confirmLive: true,
-    })) as { active: boolean };
-    assert.equal(activation.active, true);
+    await assert.rejects(
+      app.execute({ type: "activate-publication", pageId: "page", confirmLive: true }),
+      /readiness/
+    );
     const deactivation = (await app.execute({
       type: "deactivate-publication",
       reason: "test",

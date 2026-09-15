@@ -31,11 +31,11 @@ Implement only this ticket after dependencies have completion evidence. Keep unr
 
 ## Completion record
 
-- Implementation result: pending
-- Changed files: pending
-- Tests and actual results: pending
+- Implementation result: completed local service coordination. Service phases claim/renew/fence durable leases and distinct native/Codex permits; due opportunities survive missed minutes; preview retains notifications locally; and independent phases progress during long work. Pi low-space deferral preserves the 90-day coverage target without creating partial artifacts. After a stale lease expiry, a second coordinator can finish the durable request while the stale owner is fenced from overwriting its artifact.
+- Changed files: src/service.ts; src/store.ts; src/app.ts; src/coordinator.ts; src/maintenance.ts; test/pi-service.test.ts
+- Tests and actual results: `node --test test/pi-service.test.ts test/pi-publication-gate.test.ts` passed; `npm run typecheck` passed; `git diff --check` passed. Lint environment limitation and restricted-child-process full-suite result are recorded in ticket 23.
 - Native ARM64 or external verification: not performed
-- Remaining blockers/limitations: pending
+- Remaining blockers/limitations: current-day image/text slots run before video slots, preserving independent work when video is source/quota constrained. Fixture leasing proves fencing after an artificial expiry but does not establish real Pi throughput, external polling, Telegram, Facebook, or network activity.
 
 ## Comments
 

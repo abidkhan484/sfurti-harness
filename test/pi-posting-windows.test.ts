@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parsePostingWindows, postingMinutes } from "../src/deployment/posting-windows.ts";
+import {
+  availablePostingCapacity,
+  parsePostingWindows,
+  postingMinutes,
+} from "../src/deployment/posting-windows.ts";
 
 const valid = {
   timezone: "Asia/Dhaka",
@@ -29,5 +33,28 @@ test("Pi posting windows reject timezone, evidence, overlap and cannot fabricate
         60
       ),
     /overlap/
+  );
+});
+test("capacity includes existing schedules and late-day elapsed windows", () => {
+  const input = parsePostingWindows(
+    { ...valid, windows: [{ start: "09:00", end: "13:00" }] },
+    60
+  );
+  assert.equal(
+    availablePostingCapacity(input, {
+      date: "2026-09-15",
+      spacingMinutes: 60,
+      now: new Date("2026-09-15T08:30:00+06:00"),
+      occupiedAt: ["2026-09-15T10:00:00+06:00"],
+    }),
+    4
+  );
+  assert.equal(
+    availablePostingCapacity(input, {
+      date: "2026-09-15",
+      spacingMinutes: 60,
+      now: new Date("2026-09-15T12:05:00+06:00"),
+    }),
+    1
   );
 });

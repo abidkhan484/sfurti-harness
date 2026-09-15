@@ -31,11 +31,11 @@ Implement only this ticket after dependencies have completion evidence. Keep unr
 
 ## Completion record
 
-- Implementation result: pending
-- Changed files: pending
-- Tests and actual results: pending
+- Implementation result: completed local setup workflow. Setup sample validates current permission/integrity and one unused qualified candidate set; setup status exposes exact retained artifact stages; selected Telegram sends journal intent and hold ambiguity; probes write typed receipts; and publish-one/activation remain separate explicit commands. The isolated benchmark is preview-only, distinct-source-bound, resumable after nonterminal work, and never satisfies daily quotas.
+- Changed files: src/app.ts; src/cli.ts; src/coordinator.ts; src/notifications.ts; src/adapters/local/discovery.ts; test/pi-discovery.test.ts; test/pi-publication-gate.test.ts; test/pi-setup-cli.test.ts; test/pi-benchmark.test.ts
+- Tests and actual results: `node --test test/pi-setup-cli.test.ts test/pi-benchmark.test.ts` passed (2/2); `node --test test/pi-discovery.test.ts test/pi-service.test.ts` passed (2 files, 4 tests); `npm run typecheck` passed; `git diff --check` passed. Lint environment limitation and restricted-child-process full-suite result are recorded in ticket 23.
 - Native ARM64 or external verification: not performed
-- Remaining blockers/limitations: pending
+- Remaining blockers/limitations: fixture tests do not establish an actual Codex inference, native render, account probe, or Telegram send. Sample/benchmark deferral recovery remains dependent on persisted provider/native state on the Pi.
 
 ## Comments
 

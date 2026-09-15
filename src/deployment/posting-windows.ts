@@ -66,6 +66,36 @@ export function postingMinutes(input: PostingWindows) {
   for (const w of input.windows) for (let n = minute(w.start); n <= minute(w.end); n++) all.push(n);
   return all;
 }
+/**
+ * Maximum future placements for one Bangladesh calendar day.  This deliberately
+ * treats every existing remote-confirmed/local plan as occupied, so doctor and
+ * planning never claim capacity that a saved schedule has already consumed.
+ */
+export function availablePostingCapacity(input: PostingWindows, options: {
+  date: string;
+  spacingMinutes: number;
+  now: Date;
+  occupiedAt?: string[];
+}) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(options.date)) throw new Error("Invalid posting date");
+  if (!Number.isSafeInteger(options.spacingMinutes) || options.spacingMinutes <= 0)
+    throw new Error("Posting spacing must be a positive whole number of minutes");
+  const spacing = options.spacingMinutes * 60_000;
+  const toTime = (minuteOfDay: number) =>
+    Date.parse(`${options.date}T00:00:00+06:00`) + minuteOfDay * 60_000;
+  const occupied = (options.occupiedAt ?? [])
+    .map((value) => Date.parse(value))
+    .filter((value) => Number.isFinite(value));
+  const selected: number[] = [];
+  for (const candidate of postingMinutes(input).map(toTime)) {
+    if (candidate <= options.now.getTime()) continue;
+    if (
+      [...occupied, ...selected].every((scheduled) => Math.abs(candidate - scheduled) >= spacing)
+    )
+      selected.push(candidate);
+  }
+  return selected.length;
+}
 export const postingWindowsExample = {
   timezone: "Asia/Dhaka",
   windows: [

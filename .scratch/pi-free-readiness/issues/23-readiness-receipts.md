@@ -31,12 +31,14 @@ Implement only this ticket after dependencies have completion evidence. Keep unr
 
 ## Completion record
 
-- Implementation result: pending
-- Changed files: pending
-- Tests and actual results: pending
+- Implementation result: completed local staged-readiness implementation. Pi doctor remains read-only; native evidence is manifest-byte-bound; stale/future/fixture connection receipts fail; and sample attestation re-hashes approved source/review lineage. Facebook read-back proof is format-specific and additionally binds the retained current artifact version/hash/file bytes, while remaining independent of bootstrap readiness.
+- Changed files: src/deployment/readiness.ts; src/deployment/contracts.ts; src/maintenance.ts; src/app.ts; test/pi-contracts.test.ts; test/pi-doctor.test.ts
+- Tests and actual results: `node --test test/pi-doctor.test.ts` passed (2/2); `node --test test/pi-contracts.test.ts` passed (1/1); `npm run typecheck` passed; `git diff --check` passed. `npm run lint` cannot run because this environment resolves ESLint 6.4.0 without the repository’s modern configuration. The restricted sandbox cannot execute the Node child fixtures in `test/adapters.test.ts`.
 - Native ARM64 or external verification: not performed
-- Remaining blockers/limitations: pending
+- Remaining blockers/limitations: aggregate configuration fingerprints deliberately invalidate all receipts on a relevant Page/operator/model/tool/mission change; no on-device/account evidence is claimed. Real native, Codex/search/Page/Telegram, and format-specific publication receipts remain operator work.
 
 ## Comments
 
 Created from the agreed Pi/free-service deployment requirements; not executed during specification.
+
+2026-09-15: Added retained-file/version binding for live read-back fixture proof. Doctor performed no external call or notification.

@@ -31,12 +31,14 @@ Implement only this ticket after dependencies have completion evidence. Keep unr
 
 ## Completion record
 
-- Implementation result: partial fixture regression added for the preview service boundary only; focused per-ticket suites remain the primary acceptance evidence.
+- Implementation result: completed fixture-level cross-boundary preview scenario: deterministic owned discovery metadata, READY-folder intake/idempotence, qualification, video render/inspection/review, image/text production/review, local planning, and zero Facebook/Telegram mutations. Focused ticket suites remain the evidence for the distinct failure/recovery cases listed in acceptance.
 - Changed files: test/pi-e2e.test.ts
-- Tests and actual results: not yet included in the final unrestricted suite rerun.
+- Tests and actual results: `node --test test/pi-e2e.test.ts` passed (2/2); `npm run typecheck` passed; `git diff --check` passed. The restricted sandbox cannot run `test/adapters.test.ts` because Node child-process execution returns `EPERM`/empty output; this is not treated as fixture evidence.
 - Native ARM64 or external verification: not performed
-- Remaining blockers/limitations: A01–A28 are not yet consolidated into the required cross-boundary end-to-end scenarios.
+- Remaining blockers/limitations: native ARM64 tools, real account receipts, and operator media remain outside offline fixtures. A01–A28 retain their focused suites rather than falsely treating one fixture flow as real readiness evidence.
 
 ## Comments
 
 Created from the agreed Pi/free-service deployment requirements; not executed during specification.
+
+2026-09-15: Added deterministic synthetic owned-media preview coverage; no network, credential, Telegram, or Facebook action occurred.

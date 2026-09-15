@@ -33,6 +33,16 @@ export class LocalDiscovery {
     this.config = config;
     this.search = new SearxngSearch({ baseUrl: config.endpoint, transport: config.transport });
   }
+  /** Explicit, bounded connectivity check; discovery itself remains opt-in. */
+  async probe(signal?: AbortSignal) {
+    const result = await this.search.search({
+      query: "Sfurti setup connectivity",
+      language: "bn",
+      limit: 1,
+      signal: signal ?? new AbortController().signal,
+    });
+    return { partial: result.coverage.partial, hitCount: result.hits.length };
+  }
   async discover(input: Input) {
     if (this.cache.has(input.idempotencyKey)) return this.cache.get(input.idempotencyKey);
     const signal = input.signal ?? new AbortController().signal;

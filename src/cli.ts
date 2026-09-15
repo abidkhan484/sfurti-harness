@@ -41,11 +41,15 @@ const help = `Sfurti harness (Node 24+)
   npm run sfurti -- retry ARTIFACT_ID --reason "..."
   npm run sfurti -- backup --destination PATH
   npm run sfurti -- command --json '{"type":"setup-probe","target":"codex|search|facebook","requestId":"ID"}'
+  npm run sfurti -- command --json '{"type":"setup-init"}'
   npm run sfurti -- command --json '{"type":"setup-sample","sourceId":"ID","requestId":"ID"}'
   npm run sfurti -- command --json '{"type":"setup-sample-status","requestId":"ID"}'
   npm run sfurti -- command --json '{"type":"setup-send","artifactId":"ID","requestId":"ID"}'
   npm run sfurti -- command --json '{"type":"setup-attest","artifactId":"ID"}'
   npm run sfurti -- command --json '{"type":"setup-benchmark","requestId":"ID"}'
+  npm run sfurti -- command --json '{"type":"publish-one","artifactId":"ID","expectedSha256":"HASH","pageId":"PAGE","requestId":"ID","confirmLive":true}'
+  npm run sfurti -- command --json '{"type":"activate-publication","pageId":"PAGE","confirmLive":true}'
+  npm run sfurti -- command --json '{"type":"deactivate-publication","reason":"REASON"}'
   npm run sfurti -- start
 Set SFURTI_CONFIG or copy config/harness.example.json to config/harness.json.
 Source permission JSON must include evidencePath, scope array, and applicable restrictions/expiry.
@@ -124,12 +128,23 @@ try {
           ...(values.days ? { days: Number(values.days) } : {}),
           destination: values.destination,
         };
-      console.log(JSON.stringify(await app.execute(command), null, 2));
+      const result = await app.execute(command);
+      console.log(JSON.stringify(result, null, 2));
+      if (
+        name === "command" &&
+        result &&
+        typeof result === "object" &&
+        ["failed", "partial", "unknown", "deferred", "held"].includes(
+          String((result as { status?: unknown; outcome?: unknown }).status ?? (result as { outcome?: unknown }).outcome)
+        )
+      )
+        process.exitCode = 1;
     }
   } finally {
     close();
   }
 } catch (error) {
-  console.error(String(error));
+  if (name === "command") console.error(JSON.stringify({ error: String(error) }));
+  else console.error(String(error));
   process.exitCode = 1;
 }

@@ -48,6 +48,7 @@ const collections = [
   "operation_journals",
   "storage_reservations",
   "telegram_updates",
+  "service_tasks",
 ];
 
 /** One writer transaction owns decisions; external work must occur outside transaction(). */
@@ -79,6 +80,7 @@ export class Store {
         "CREATE INDEX IF NOT EXISTS setup_receipt_target_kind ON setup_receipts(json_extract(data, '$.target'), json_extract(data, '$.kind'), json_extract(data, '$.checkedAt'));" +
         "CREATE INDEX IF NOT EXISTS operation_journal_destination ON operation_journals(json_extract(data, '$.destinationIdentity'), json_extract(data, '$.selectedArtifactHash'));" +
         "CREATE INDEX IF NOT EXISTS storage_reservation_status ON storage_reservations(json_extract(data, '$.status'), json_extract(data, '$.leaseUntil'));" +
+        "CREATE INDEX IF NOT EXISTS service_task_due ON service_tasks(json_extract(data, '$.status'), json_extract(data, '$.nextRunAt'));" +
         "INSERT OR IGNORE INTO schema_migrations VALUES (3);"
     );
   }

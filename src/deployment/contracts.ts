@@ -158,6 +158,15 @@ export function parseQualification(value: unknown): Qualification {
 }
 
 const receiptOutcomes = ["passed", "failed", "partial", "unknown"] as const;
+const receiptKinds = [
+  "local-fixture",
+  "native-tool",
+  "codex-inference",
+  "search",
+  "page-read",
+  "telegram-send",
+  "facebook-publish-readback",
+] as const;
 export interface SetupReceipt {
   id: string;
   schemaVersion: 1;
@@ -179,7 +188,8 @@ export function parseSetupReceipt(value: unknown): SetupReceipt {
   if (
     !isRecord(value) ||
     value.schemaVersion !== 1 ||
-    !receiptOutcomes.includes(value.outcome as never)
+    !receiptOutcomes.includes(value.outcome as never) ||
+    !receiptKinds.includes(value.kind as never)
   )
     throw new Error("setup receipt is invalid");
   return {

@@ -63,7 +63,7 @@ test("Pi durable contracts round trip valid records", () => {
       id: "x",
       schemaVersion: 1,
       target: "codex",
-      kind: "inference",
+      kind: "codex-inference",
       checkedAt: "2026-01-01T00:00:00.000Z",
       outcome: "passed",
       configFingerprint: "c",

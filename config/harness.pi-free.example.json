@@ -1,0 +1,30 @@
+{
+  "deployment": {
+    "profile": "pi-free",
+    "executionMode": "preview",
+    "delivery": { "enabled": false }
+  },
+  "llm": {
+    "billingMode": "chatgpt-only",
+    "taskModels": {
+      "generation": { "provider": "codex", "model": "SET_AFTER_LOCAL_LOGIN" },
+      "review": { "provider": "codex", "model": "SET_AFTER_LOCAL_LOGIN" }
+    }
+  },
+  "posting": {
+    "windowsFile": "./config/posting-windows.json",
+    "minSpacingMinutes": 60,
+    "queueCsvPath": "./data/exports/upload-queue.csv"
+  },
+  "integrations": {
+    "facebook": {
+      "kind": "graph",
+      "pageId": "SET_ON_PI",
+      "tokenFile": "/run/secrets/sfurti/facebook-page-token"
+    },
+    "telegram": {
+      "operatorUserId": "SET_ON_PI",
+      "tokenFile": "/run/secrets/sfurti/telegram-bot-token"
+    }
+  }
+}
