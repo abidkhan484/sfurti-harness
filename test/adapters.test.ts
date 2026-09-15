@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { AdapterError, ProcessAdapter } from "../src/adapters/process.ts";
 import { TelegramOperator } from "../src/adapters/telegram.ts";
+import type { CodexConfig, LlmRequest, LlmResult } from "../src/adapters/codex.ts";
 
 test("external process treats user input as data and returns Unicode intact", async () => {
   const adapter = new ProcessAdapter({
@@ -19,7 +20,7 @@ test("external process timeout has an uncertain outcome and bounded output is en
   const stalled = new ProcessAdapter({
     executable: process.execPath,
     args: ["-e", "setInterval(()=>{},1000)"],
-    timeoutMs: 40,
+    timeoutMs: 100,
   });
   await assert.rejects(
     stalled.call("submit", {}),
@@ -172,19 +173,23 @@ test("Codex decisions use independent restricted contexts and distinguish tokens
 
 test("Codex rejects the retired single-model configuration", async () => {
   const { CodexStrategy } = await import("../src/adapters/codex.ts");
+  const retiredConfig: CodexConfig & { model: string } = {
+    model: "old-model",
+    authFile: "/private/auth.json",
+  };
   assert.throws(
-    () => new CodexStrategy({ model: "old-model", authFile: "/private/auth.json" } as any),
+    () => new CodexStrategy(retiredConfig),
     (e: unknown) => e instanceof AdapterError && /llm\.taskModels/.test(e.message)
   );
 });
 
 test("LLM task routes dispatch configured models and reject missing, unknown, and unsupported routes", async () => {
   const { TaskModelRouter } = await import("../src/adapters/llm.ts");
-  const calls: any[] = [];
+  const calls: Array<{ model: string; purpose: string }> = [];
   const provider = {
     capabilities: { text: true, images: true, audio: false, video: false },
     supportsModel: (model: string) => ["small", "strong"].includes(model),
-    structured: async <T>(model: string, request: any): Promise<any> => {
+    structured: async <T>(model: string, request: LlmRequest<T>): Promise<LlmResult<T>> => {
       calls.push({ model, purpose: request.purpose });
       return {
         value: { ok: true } as T,
@@ -240,13 +245,10 @@ test("LLM task routes dispatch configured models and reject missing, unknown, an
 
 test("an external reviewer retains precedence and the Codex reviewer requires its review route", async () => {
   const { createConfiguredAdapters, CodexReviewer } = await import("../src/adapters/index.ts");
-  const external = createConfiguredAdapters(
-    {
-      codex: { authFile: "/private/auth.json" },
-      reviewer: { executable: process.execPath },
-    } as any,
-    {}
-  );
+  const external = createConfiguredAdapters({
+    codex: { authFile: "/private/auth.json" },
+    reviewer: { executable: process.execPath },
+  });
   assert.ok(external.reviewer);
   assert.equal(external.reviewer instanceof CodexReviewer, false);
   const adapters = createConfiguredAdapters({ codex: { authFile: "/private/auth.json" } }, {});

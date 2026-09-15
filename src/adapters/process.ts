@@ -86,8 +86,11 @@ export class ProcessAdapter implements OperationAdapter {
       const decoder = new StringDecoder("utf8");
       const stop = () => {
         try {
-          if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
-          else child.kill("SIGKILL");
+          // Killing a negative process group can terminate the Node test-worker
+          // that owns the adapter on some launchers. The adapter runs one
+          // direct child only, so terminate that child without touching its
+          // caller's process group.
+          child.kill("SIGKILL");
         } catch {
           /* Already exited. */
         }

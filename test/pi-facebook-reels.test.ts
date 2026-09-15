@@ -222,6 +222,47 @@ test("Preview, bad artifact hash, and lost response never perform or retry a Ree
   }
 });
 
+test("direct live Reel submission fails before file/token/HTTP work without durable verification", async () => {
+  const f = await fixture();
+  try {
+    let calls = 0;
+    const graph = new FacebookGraph(
+      {
+        kind: "graph",
+        pageId: "page",
+        graphApiVersion: "v26.0",
+        tokenFile: f.tokenFile,
+        executionMode: "live",
+      },
+      {
+        request: async () => {
+          calls++;
+          return { status: 200, json: {} };
+        },
+      }
+    );
+    await assert.rejects(
+      graph.submitReel(
+        {
+          id: "post",
+          artifactHash: f.hash,
+          publicationAuthorization: {
+            operation: "submit",
+            pageId: "page",
+            requestId: "fixture",
+            artifactHash: f.hash,
+          },
+        },
+        f.video
+      ),
+      /verifier/
+    );
+    assert.equal(calls, 0);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
 async function streamBytes(value: unknown): Promise<Buffer> {
   const chunks: Buffer[] = [];
   for await (const chunk of value as AsyncIterable<Buffer>) chunks.push(Buffer.from(chunk));

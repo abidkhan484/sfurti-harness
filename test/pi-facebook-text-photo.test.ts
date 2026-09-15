@@ -37,6 +37,54 @@ test("Graph transport uses an explicit version and preview blocks mutation befor
   }
 });
 
+test("live direct Graph calls fail closed without a harness-installed durable authorization verifier", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sfurti-facebook-"));
+  try {
+    const tokenFile = join(root, "token");
+    await writeFile(tokenFile, "synthetic-token");
+    let calls = 0;
+    const adapter = new FacebookGraph(
+      { kind: "graph", pageId: "page", graphApiVersion: "v26.0", tokenFile, executionMode: "live" },
+      {
+        request: async () => {
+          calls++;
+          return { status: 200, json: { id: "remote" } };
+        },
+      }
+    );
+    await assert.rejects(
+      adapter.submit({
+        id: "post",
+        publicationAuthorization: {
+          operation: "submit",
+          pageId: "page",
+          requestId: "fixture",
+          artifactHash: "hash",
+        },
+      }),
+      /verifier/
+    );
+    await assert.rejects(
+      adapter.submitPhoto(
+        {
+          id: "post",
+          publicationAuthorization: {
+            operation: "submit",
+            pageId: "page",
+            requestId: "fixture",
+            artifactHash: "hash",
+          },
+        },
+        "https://example.test/image.png"
+      ),
+      /verifier/
+    );
+    assert.equal(calls, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Graph transport journals intent and sends documented Page feed request through fake HTTP", async () => {
   const root = await mkdtemp(join(tmpdir(), "sfurti-facebook-"));
   try {

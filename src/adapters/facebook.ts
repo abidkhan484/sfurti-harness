@@ -165,12 +165,23 @@ export class FacebookGraph {
   private intent(operation: string, post: Record<string, unknown>) {
     const contentHash = createHash("sha256").update(JSON.stringify(post)).digest("hex");
     const id = `facebook:${operation}:${String(post.id ?? contentHash)}`;
+    const authorization = record(post.publicationAuthorization)
+      ? (post.publicationAuthorization as PublicationAuthorization)
+      : undefined;
     this.journal?.put("operation_journals", {
       id,
+      operationId: id,
       operation,
       destinationIdentity: this.config.pageId,
       explicitApiVersion: this.config.graphApiVersion,
-      selectedArtifactHash: contentHash,
+      selectedArtifactHash: authorization?.artifactHash ?? contentHash,
+      artifactId: authorization?.artifactId,
+      artifactVersion: authorization?.artifactVersion,
+      requestFingerprint: authorization?.requestId ?? contentHash,
+      attempt: 1,
+      remoteIds: [],
+      lastConfirmedState: "intended",
+      uncertainty: false,
       status: "intended",
       createdAt: new Date().toISOString(),
     });

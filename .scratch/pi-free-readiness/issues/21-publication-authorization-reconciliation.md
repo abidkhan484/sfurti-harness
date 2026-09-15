@@ -31,12 +31,14 @@ Implement only this ticket after dependencies have completion evidence. Keep unr
 
 ## Completion record
 
-- Implementation result: partial fixture implementation. Graph submit/photo/Reel and known Page-post cancellation now require a Page-bound authorization before secret resolution or mocked HTTP; preview still rejects mutations. Planning holds incomplete/absent reconciliation as unknown instead of retrying it, and one-shot authorization is Page/request/artifact-version/hash/post/operation bound.
-- Changed files: src/app.ts; src/planning.ts; src/service.ts; src/adapters/facebook.ts; test/pi-publication-gate.test.ts; test/pi-facebook-text-photo.test.ts; test/pi-facebook-reels.test.ts
-- Tests and actual results: `node --test --test-reporter spec test/pi-publication-gate.test.ts test/pi-posting-windows.test.ts test/pi-backup.test.ts` passed (3/3); `npm run typecheck` passed. Full suite still needs a stable rerun after the shared changes.
+- Implementation result: partial fixture implementation. Built-in Graph mutations now fail closed without a harness-installed durable authorization verifier; the harness binds and verifies Page/artifact/version/hash/request/post/operation/current-critical-config identity, persists adapter intent to the Store, and holds lost outcomes. Preview service cycles reconcile/local-work only. Date-owned opportunities catch up after a missed production minute.
+- Changed files: src/app.ts; src/planning.ts; src/service.ts; src/adapters/facebook.ts; src/adapters/process.ts; src/coordinator.ts; test/adapters.test.ts; test/pi-publication-gate.test.ts; test/pi-facebook-text-photo.test.ts; test/pi-facebook-reels.test.ts
+- Tests and actual results: `npm run typecheck` passed; `npm run lint` passed with existing warnings; `node --test --test-reporter spec test/pi-facebook-text-photo.test.ts test/pi-facebook-reels.test.ts test/pi-publication-gate.test.ts test/planning.test.ts` passed (4/4 files); `git diff --check` passed; `npm test` passed (125/125 tests). Diagnosed and resolved process group kill in ProcessAdapter that was terminating Node test worker under npm test.
 - Native ARM64 or external verification: not performed
 - Remaining blockers/limitations: real Graph contracts/capability, Page authority, permission expiry at real intended time, and any real read-back/cancellation remain unverified; no external action occurred.
 
 ## Comments
 
 Created from the agreed Pi/free-service deployment requirements; not executed during specification.
+
+2026-09-15: Continued fixture-only hardening. No credentials were read or logged; no account, network, Telegram, Facebook, publication, commit, push, deletion, or recurring activation action occurred.
