@@ -1,8 +1,11 @@
 import { AdapterError, isRecord, type OperationAdapter } from "./process.ts";
-import { readFileSync, statSync } from "node:fs";
+import { readFile, statSync } from "node:fs";
+import { promisify } from "node:util";
 import { basename } from "node:path";
 import { resolveSecretFile } from "../deployment/secrets.ts";
 import type { Store, RecordData } from "../store.ts";
+
+const readFileAsync = promisify(readFile);
 
 const hostedLimitBytes = 50 * 1024 * 1024;
 export type TelegramHttp = (request: {
@@ -69,12 +72,10 @@ export class TelegramDelivery {
     const body = new FormData();
     body.set("chat_id", this.options.operatorUserId);
     body.set("caption", input.text.slice(0, 1024));
-    for (const [index, path] of paths.entries())
-      body.append(
-        index ? `document${index}` : "document",
-        new Blob([readFileSync(path)]),
-        basename(path)
-      );
+    for (const [index, path] of paths.entries()) {
+      const contents = await readFileAsync(path);
+      body.append(index ? `document${index}` : "document", new Blob([contents]), basename(path));
+    }
     let response: {
       status: number;
       body: { ok?: boolean; result?: { message_id?: number; document?: { file_id?: string } } };

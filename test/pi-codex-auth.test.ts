@@ -3,8 +3,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { withIsolatedCodexAuth } from "../src/deployment/codex-auth.ts";
+import { withIsolatedCodexAuth, codexAuthReceipt } from "../src/deployment/codex-auth.ts";
 import { CodexStrategy } from "../src/adapters/codex.ts";
+import { parseSetupReceipt } from "../src/deployment/contracts.ts";
 
 test("isolated auth refresh persists only from the current cache generation", async () => {
   const root = await mkdtemp(join(tmpdir(), "sfurti-codex-auth-")),
@@ -42,4 +43,22 @@ test("Pi Codex rejects API-key mode and exposes only sanitized probe data", () =
   const probe = strategy.probe("codex-model");
   assert.equal(probe.authentication, "chatgpt-session");
   assert.equal(JSON.stringify(probe).includes("token"), false);
+});
+test("codexAuthReceipt kind survives parseSetupReceipt (must be codex-inference)", () => {
+  const raw = codexAuthReceipt("/private/codex", "gpt-4o");
+  assert.equal(raw.kind, "codex-inference");
+  // Round-trip through the parser proves the kind is in the accepted enum.
+  assert.doesNotThrow(() =>
+    parseSetupReceipt({
+      ...raw,
+      id: "receipt-1",
+      schemaVersion: 1,
+      target: "codex",
+      checkedAt: new Date().toISOString(),
+      outcome: "passed",
+      configFingerprint: "fp",
+      evidencePaths: [],
+      limitations: [],
+    })
+  );
 });

@@ -3,7 +3,16 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { LocalClipEditor } from "../src/adapters/local/editor.ts";
+import { LocalClipEditor, assTimestamp } from "../src/adapters/local/editor.ts";
+
+test("assTimestamp produces h:mm:ss.cs format for all durations", () => {
+  assert.equal(assTimestamp(0), "0:00:00.00");
+  assert.equal(assTimestamp(1000), "0:00:01.00");
+  assert.equal(assTimestamp(3000), "0:00:03.00");
+  assert.equal(assTimestamp(65_500), "0:01:05.50");
+  assert.equal(assTimestamp(3_661_250), "1:01:01.25");
+  assert.equal(assTimestamp(999), "0:00:00.99");
+});
 
 test("clip renderer preserves the exact allocated interval and reuses an atomic completed output", async () => {
   const root = await mkdtemp(join(tmpdir(), "sfurti-clip-"));

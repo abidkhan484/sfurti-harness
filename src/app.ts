@@ -237,11 +237,18 @@ export function createHarness(options: HarnessOptions = {}) {
           .find((p) => p.artifactId === artifact.id && p.status === "planned");
         if (!post) throw new Error("Selected artifact has no planned publication");
         const id = `publication-authorization:${command.requestId}`;
-        const prior = store.get("operation_journals", id);
-        if (prior)
+        const prior = store.get<Record<string, unknown>>("operation_journals", id);
+        if (prior) {
+          const priorStatus = prior.status;
+          if (priorStatus === "consumed")
+            throw new Error(
+              "Selected publication authorization was already used. Check the published post before retrying."
+            );
           throw new Error(
-            "Selected publication authorization was already used or is held for reconciliation"
+            `Selected publication authorization is ${priorStatus} (requestId: ${command.requestId}). ` +
+              "Use a new requestId to retry with a fresh authorization."
           );
+        }
         const bound = authorization(post, "submit", command.requestId, true);
         const selected = {
           ...bound,
@@ -463,9 +470,8 @@ export function createHarness(options: HarnessOptions = {}) {
       case "setup-attest": {
         if (typeof command.artifactId !== "string")
           throw new Error("setup-attest requires an artifactId");
-        const { sampleIsCurrent, readinessFingerprint, toolManifestHash } = await import(
-          "./deployment/readiness.ts"
-        );
+        const { sampleIsCurrent, readinessFingerprint, toolManifestHash } =
+          await import("./deployment/readiness.ts");
         const sample = sampleIsCurrent(ctx, command.artifactId);
         if (!sample.ok) throw new Error(`setup-attest ${sample.reason}`);
         const nativeReceipt = store.all("setup_receipts").some((value) => {
@@ -482,7 +488,8 @@ export function createHarness(options: HarnessOptions = {}) {
             return false;
           }
         });
-        if (!nativeReceipt) throw new Error("setup-attest requires current real native-tool receipt");
+        if (!nativeReceipt)
+          throw new Error("setup-attest requires current real native-tool receipt");
         const { fileIntegrity } = await import("./domain.ts");
         fileIntegrity(sample.artifact.filePath, sample.version.integrity, true);
         return store.put("meta", {
@@ -533,7 +540,9 @@ export function createHarness(options: HarnessOptions = {}) {
           throw new Error("setup-send request ID belongs to a different selected artifact");
         if (previous?.phase === "confirmed") return previous.result;
         if (previous?.uncertainty)
-          throw new Error("setup-send is held for Telegram reconciliation; do not resend automatically");
+          throw new Error(
+            "setup-send is held for Telegram reconciliation; do not resend automatically"
+          );
         store.put("operation_journals", {
           id: journalId,
           operationId: journalId,
@@ -672,9 +681,7 @@ export function createHarness(options: HarnessOptions = {}) {
             Array.isArray(set) &&
             set.length &&
             !set.some((segment: { startMs: number; endMs: number }) =>
-              used.some(
-                (other) => segment.startMs < other.endMs && other.startMs < segment.endMs
-              )
+              used.some((other) => segment.startMs < other.endMs && other.startMs < segment.endMs)
             )
         );
         if (!selected) throw new Error("setup-sample has no unused qualified interval set");
@@ -696,7 +703,10 @@ export function createHarness(options: HarnessOptions = {}) {
       case "setup-benchmark": {
         if (typeof command.requestId !== "string")
           throw new Error("setup-benchmark requires requestId");
-        if (config.deployment?.profile !== "pi-free" || config.deployment.executionMode !== "preview")
+        if (
+          config.deployment?.profile !== "pi-free" ||
+          config.deployment.executionMode !== "preview"
+        )
           throw new Error("setup-benchmark is available only in Pi preview mode");
         const benchmarkId = `setup-benchmark:${command.requestId}`;
         const existingBenchmark = store.get("meta", benchmarkId);
@@ -772,8 +782,10 @@ export function createHarness(options: HarnessOptions = {}) {
             elapsedMs: Math.max(0, ctx.now().getTime() - startedMs),
             peakRssBytes: Math.max(memoryBefore, process.memoryUsage().rss),
             diskGrowthBytes: Math.max(0, beforeFreeBytes - after.bavail * after.bsize),
-            approvedArtifacts: artifacts.filter((artifact) => artifact.status === "approved").length,
-            deferredArtifacts: artifacts.filter((artifact) => artifact.status === "deferred").length,
+            approvedArtifacts: artifacts.filter((artifact) => artifact.status === "approved")
+              .length,
+            deferredArtifacts: artifacts.filter((artifact) => artifact.status === "deferred")
+              .length,
             failedArtifacts: artifacts.filter((artifact) => artifact.status === "failed").length,
             stages,
             quotaRecords: stages.filter((stage: RecordData) => stage.quota !== "not-deferred"),
@@ -783,7 +795,10 @@ export function createHarness(options: HarnessOptions = {}) {
               protectedFreeBytes: minFreeBytes,
               additionalPackagesAtObservedSize:
                 outputBytes > 0
-                  ? Math.max(0, Math.floor((after.bavail * after.bsize - minFreeBytes) / outputBytes))
+                  ? Math.max(
+                      0,
+                      Math.floor((after.bavail * after.bsize - minFreeBytes) / outputBytes)
+                    )
                   : null,
             },
           },

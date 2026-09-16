@@ -83,3 +83,55 @@ test("unsafe paths and unresolved permission restrictions are held", async () =>
     await rm(root, { recursive: true, force: true });
   }
 });
+test("video exceeding maxVideoMinutes is held at intake before register-source", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sfurti-intake-duration-"));
+  try {
+    const inbox = join(root, "inbox"),
+      item = join(inbox, "long");
+    await mkdir(item, { recursive: true });
+    await writeFile(join(item, "video.mp4"), "owned media");
+    await writeFile(join(item, "evidence.pdf"), "permission");
+    await writeFile(
+      join(item, "permission.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        submissionId: "long",
+        sourceId: "source-long",
+        originalUrl: "https://example.test/long",
+        title: "long video",
+        language: "bn",
+        videoFile: "video.mp4",
+        permission: { evidenceFile: "evidence.pdf", scope: ["edit", "facebook"], restrictions: [] },
+      })
+    );
+    // Provide a sidecar duration file so intake can enforce the cap without real ffprobe.
+    await writeFile(
+      join(item, "video.mp4.duration.json"),
+      JSON.stringify({ durationSeconds: 120 })
+    );
+    await writeFile(join(item, "READY"), "");
+    const app = createHarness({
+      config: {
+        storage: { databasePath: join(root, "db.sqlite"), mediaDirectory: join(root, "media") },
+        deployment: {
+          profile: "pi-free",
+          intake: {
+            path: inbox,
+            maxVideoBytes: 999_999_999,
+            // 1 minute cap; sidecar says 120 seconds (2 min) → must be held
+            maxVideoMinutes: 1,
+          },
+        },
+      } as never,
+    });
+    const result = (await app.execute({ type: "intake-scan" })) as {
+      status: string;
+      reason: string;
+    }[];
+    assert.equal(result[0].status, "held");
+    assert.match(result[0].reason, /minute|duration/i);
+    app.close();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

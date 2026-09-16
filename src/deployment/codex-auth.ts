@@ -2,7 +2,15 @@ import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/
 import { dirname, join } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 
-/** A tiny in-process lock plus generation fence for the single Pi process. */
+/**
+ * In-process mutex serializing Codex auth refresh within a single Node process.
+ * This prevents concurrent tasks from racing on the shared auth file within one instance.
+ *
+ * KNOWN LIMITATION: This lock does not span multiple OS processes. A brief overlap
+ * during container restart (e.g., `docker-compose restart`) can cause two instances
+ * to race on the auth file. A flock(2)-based lock file is required to cover that case.
+ * Until then, operators should ensure exactly one harness process runs at a time.
+ */
 const locks = new Map<string, Promise<void>>();
 async function locked<T>(path: string, body: () => Promise<T>): Promise<T> {
   const before = locks.get(path) ?? Promise.resolve();
@@ -67,7 +75,7 @@ async function fingerprint(path: string): Promise<string | null> {
 export function codexAuthReceipt(authDirectory: string, model: string) {
   return {
     target: "codex",
-    kind: "inference",
+    kind: "codex-inference",
     identityFingerprint: createHash("sha256").update(authDirectory).digest("hex"),
     model,
     capabilities: ["text", "images"],

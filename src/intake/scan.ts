@@ -51,7 +51,29 @@ export async function scanInbox(ctx: Context, requested?: string) {
         evidence = safe(manifest.permission.evidenceFile);
       const videoStat = statSync(video);
       if (videoStat.size > (ctx.config.deployment?.intake.maxVideoBytes ?? 0))
-        throw new Error("Video exceeds Pi intake cap");
+        throw new Error("Video exceeds Pi intake byte cap");
+      // Enforce the duration cap if a pre-computed duration sidecar is present.
+      // The sidecar (video-filename.duration.json) is written by operators or ffprobe
+      // and allows the byte cap and duration cap to both be enforced before copying.
+      const maxVideoMinutes = ctx.config.deployment?.intake.maxVideoMinutes ?? 0;
+      const durationSidecar = `${video}.duration.json`;
+      try {
+        const sidecar = JSON.parse(readFileSync(durationSidecar, "utf8")) as {
+          durationSeconds?: number;
+        };
+        if (
+          typeof sidecar.durationSeconds === "number" &&
+          sidecar.durationSeconds > maxVideoMinutes * 60
+        )
+          throw new Error(
+            `Video duration ${sidecar.durationSeconds}s exceeds intake minute cap (${maxVideoMinutes} min)`
+          );
+      } catch (err) {
+        if (err instanceof SyntaxError)
+          throw new Error("Video duration sidecar is not valid JSON", { cause: err });
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+        // No sidecar present: duration will be enforced at qualification time.
+      }
       if (manifest.permission.restrictions.length)
         throw new Error("Permission restrictions require resolution");
       const before = fileIntegrity(video),

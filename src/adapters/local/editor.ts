@@ -3,6 +3,15 @@ import { existsSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runLocalTool } from "./runner.ts";
 
+/** Formats milliseconds as ASS subtitle clock: h:mm:ss.cs (centiseconds). */
+export function assTimestamp(ms: number): string {
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  const s = Math.floor((ms % 60_000) / 1_000);
+  const cs = Math.floor((ms % 1_000) / 10);
+  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
+}
+
 const escape = (value: string) =>
   value.replace(
     /[&<>'"]/g,
@@ -102,9 +111,13 @@ export class LocalClipEditor {
     subtitles: Array<{ startMs: number; endMs: number; textBn: string }>;
     signal?: AbortSignal;
   }) {
+    // Current implementation renders exactly one contiguous source segment.
+    // Multi-segment concatenation is a known future improvement (spec allows non-overlapping sets).
     const duration = input.segments.reduce((sum, s) => sum + s.endMs - s.startMs, 0);
     if (duration < 30_000 || duration > 60_000 || input.segments.length !== 1)
-      throw new Error("Clip requires one exact 30–60 second allocated interval");
+      throw new Error(
+        "Clip requires one exact 30–60 second allocated interval (single segment only)"
+      );
     const output = join(input.outputDirectory, "artifact.mp4"),
       manifest = join(input.outputDirectory, "manifest.json");
     if (existsSync(output) && existsSync(manifest))
@@ -113,7 +126,7 @@ export class LocalClipEditor {
       subtitle = join(input.outputDirectory, "captions.ass");
     writeFileSync(
       subtitle,
-      `[Script Info]\nScriptType: v4.00+\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,Alignment,MarginV\nStyle: Default,${this.config.fontPath.replace(/[,\\]/g, "")},42,&H00FFFFFF,2,120\n[Events]\nFormat: Layer,Start,End,Style,Text\n${input.subtitles.map((s) => `Dialogue: 0,0:00:${String(s.startMs / 1000).padStart(5, "0")},0:00:${String(s.endMs / 1000).padStart(5, "0")},Default,${s.textBn.replace(/[{}\\]/g, "")}`).join("\n")}`,
+      `[Script Info]\nScriptType: v4.00+\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,Alignment,MarginV\nStyle: Default,${this.config.fontPath.replace(/[,\\]/g, "")},42,&H00FFFFFF,2,120\n[Events]\nFormat: Layer,Start,End,Style,Text\n${input.subtitles.map((s) => `Dialogue: 0,${assTimestamp(s.startMs)},${assTimestamp(s.endMs)},Default,${s.textBn.replace(/[{}\\]/g, "")}`).join("\n")}`,
       "utf8"
     );
     const partial = `${output}.partial`;
