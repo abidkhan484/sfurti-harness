@@ -51,6 +51,9 @@ export function createHarness(options: HarnessOptions = {}) {
       }
     | undefined;
   guardedFacebook?.setJournal?.(store);
+  const guardedDelivery = (adapters as Record<string, unknown>).delivery as
+    { setJournal?: (journal: Store) => void } | undefined;
+  guardedDelivery?.setJournal?.(store);
   guardedFacebook?.setAuthorizationVerifier?.((authorization) => {
     const receipt = store.get(
       "operation_journals",

@@ -71,7 +71,7 @@ export class TelegramDelivery {
     });
     const body = new FormData();
     body.set("chat_id", this.options.operatorUserId);
-    body.set("caption", input.text.slice(0, 1024));
+    body.set(paths.length ? "caption" : "text", input.text.slice(0, paths.length ? 1024 : 4096));
     for (const [index, path] of paths.entries()) {
       const contents = await readFileAsync(path);
       body.append(index ? `document${index}` : "document", new Blob([contents]), basename(path));

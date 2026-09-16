@@ -157,9 +157,13 @@ export class FacebookGraph {
   async bounds() {
     return { minLeadMinutes: 10, maxLeadDays: 30, remoteScheduling: true };
   }
-  /** Explicit read-only probe of the documented Page feed endpoint. */
+  /** Explicit read-only probe of the documented Page published posts or feed endpoint. */
   async probe(signal?: AbortSignal) {
-    await this.call("GET", `${this.config.pageId}/feed?limit=1`, undefined, signal);
+    try {
+      await this.call("GET", `${this.config.pageId}/published_posts?limit=1`, undefined, signal);
+    } catch {
+      await this.call("GET", `${this.config.pageId}/feed?limit=1`, undefined, signal);
+    }
     return { pageId: this.config.pageId, outcome: "passed" as const };
   }
   private intent(operation: string, post: Record<string, unknown>) {

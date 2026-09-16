@@ -126,7 +126,7 @@ export class LocalClipEditor {
       subtitle = join(input.outputDirectory, "captions.ass");
     writeFileSync(
       subtitle,
-      `[Script Info]\nScriptType: v4.00+\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,Alignment,MarginV\nStyle: Default,${this.config.fontPath.replace(/[,\\]/g, "")},42,&H00FFFFFF,2,120\n[Events]\nFormat: Layer,Start,End,Style,Text\n${input.subtitles.map((s) => `Dialogue: 0,${assTimestamp(s.startMs)},${assTimestamp(s.endMs)},Default,${s.textBn.replace(/[{}\\]/g, "")}`).join("\n")}`,
+      `[Script Info]\nScriptType: v4.00+\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,Alignment,MarginV\nStyle: Default,${this.config.fontPath.replace(/[,\\]/g, "")},28,&H00FFFFFF,2,80\n[Events]\nFormat: Layer,Start,End,Style,Text\n${input.subtitles.map((s) => `Dialogue: 0,${assTimestamp(s.startMs)},${assTimestamp(s.endMs)},Default,${s.textBn.replace(/[{}\\]/g, "")}`).join("\n")}`,
       "utf8"
     );
     const partial = `${output}.partial`;
@@ -150,6 +150,8 @@ export class LocalClipEditor {
         "aac",
         "-movflags",
         "+faststart",
+        "-f",
+        "mp4",
         partial,
       ],
       cwd: input.outputDirectory,

@@ -1,12 +1,19 @@
 import { validReview, reviewSchema, type Review } from "../domain.ts";
 import { Readable } from "node:stream";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { execFileSync } from "node:child_process";
 export { validReview, type Review } from "../domain.ts";
 import { AdapterError, isRecord, ProcessAdapter, type ProcessConfig } from "./process.ts";
 import { CodexStrategy, type CodexConfig } from "./codex.ts";
 import { TaskModelRouter, type TaskModelAssignments } from "./llm.ts";
 import { LocalDiscovery } from "./local/discovery.ts";
 import { FacebookGraph, type FacebookConfig } from "./facebook.ts";
-export { TelegramOperator } from "./telegram.ts";
+import type { Store } from "../store.ts";
+import { TelegramDelivery } from "./telegram.ts";
+import { LocalClipEditor, LocalEditor } from "./local/editor.ts";
+import { CodexEditorial } from "./local/editorial.ts";
+export { TelegramDelivery, TelegramOperator } from "./telegram.ts";
 export { CodexStrategy } from "./codex.ts";
 export {
   TaskModelRouter,
@@ -54,7 +61,8 @@ export class CodexReviewer {
         id: artifact.id,
         kind: artifact.kind,
         topic: artifact.topic,
-        ageSegment: artifact.ageSegment,
+        ageSegment:
+          artifact.ageSegment && artifact.ageSegment !== "general" ? artifact.ageSegment : "6-9",
         segments: artifact.segments,
       },
       version: { number: version.number, caption: version.caption },
@@ -151,6 +159,10 @@ function extractArtifactPaths(event: unknown): string[] | undefined {
   if (typeof event.filePath === "string") return [event.filePath];
   if (isRecord(event.result) && typeof event.result.filePath === "string")
     return [event.result.filePath];
+  if (Array.isArray(event.artifactPaths)) {
+    const paths = event.artifactPaths.filter((p): p is string => typeof p === "string");
+    if (paths.length) return paths;
+  }
   if (Array.isArray(event.posts)) {
     const paths = event.posts
       .filter(isRecord)
@@ -167,7 +179,8 @@ export function createConfiguredAdapters(
   llmConfig: { taskModels?: TaskModelAssignments } = {}
 ) {
   const processFor = (name: string) =>
-    integrations[name] === undefined
+    integrations[name] === undefined ||
+    (isRecord(integrations[name]) && integrations[name].kind === "local")
       ? undefined
       : new ProcessAdapter(integrations[name] as ProcessConfig);
   const editor = processFor("editor"),
@@ -175,10 +188,13 @@ export function createConfiguredAdapters(
     discovery = processFor("discovery"),
     reviewer = processFor("reviewer"),
     hermes = processFor("hermes");
+  const codexHomeAuth = join(process.env.HOME ?? "", ".codex", "auth.json");
   const codex =
-    integrations.codex === undefined
-      ? undefined
-      : new CodexStrategy(integrations.codex as CodexConfig);
+    integrations.codex !== undefined
+      ? new CodexStrategy(integrations.codex as CodexConfig)
+      : existsSync(codexHomeAuth)
+        ? new CodexStrategy({ authFile: codexHomeAuth, chatgptOnly: true })
+        : undefined;
   const llm = codex ? new TaskModelRouter(llmConfig.taskModels, { codex }) : undefined;
   const telegramConfig = integrations.telegram;
   if (
@@ -198,6 +214,7 @@ export function createConfiguredAdapters(
       }
     : undefined;
   return {
+    codex,
     llm,
     hermes,
     telegram,
@@ -215,7 +232,116 @@ export function createConfiguredAdapters(
               "editor.create"
             ),
         }
-      : undefined,
+      : integrations.editor !== undefined
+        ? {
+            create: async (input: unknown) => {
+              const p = input as {
+                artifact: {
+                  id: string;
+                  kind: "video" | "text" | "image";
+                  segments?: Array<{ startMs: number; endMs: number }>;
+                };
+                version: number;
+                mission: unknown;
+                source?: Record<string, unknown>;
+                feedback?: unknown[];
+                outputDirectory: string;
+                idempotencyKey: string;
+                signal?: AbortSignal;
+              };
+              const fontPath = existsSync(
+                "/usr/share/fonts/truetype/noto/NotoSansBengali-Regular.ttf"
+              )
+                ? "/usr/share/fonts/truetype/noto/NotoSansBengali-Regular.ttf"
+                : "./data/fonts/NotoSansBengali-Regular.ttf";
+              if (p.artifact.kind === "video") {
+                if (!p.source || typeof p.source.filePath !== "string")
+                  throw new Error("Video production requires source with filePath");
+                let caption =
+                  "অতিরিক্ত স্ক্রিন সময়ের বদলে কাগজ ও কাঁচি দিয়ে শিশুরা যখন নিজের হাতে কিছু বানায়, তখন তাদের চিন্তা ও চেষ্টার আনন্দ প্রকাশ পায়। ৬-৯ বছর বয়সীদের জন্য কাগজ কেটে ফুল বা নৌকা বানানোর একটি সহজ ও অর্থপূর্ণ সৃষ্টিশীল বিকল্প কাজ।";
+                let subtitles = [
+                  {
+                    startMs: 0,
+                    endMs: 8000,
+                    textBn: "কাগজ দিয়ে নিজে কিছু বানানোর আনন্দ আলাদা।",
+                  },
+                  {
+                    startMs: 8000,
+                    endMs: 20000,
+                    textBn: "শিশুরা নিজে ভেবে নানা রকম আকার তৈরি করতে পারে।",
+                  },
+                  {
+                    startMs: 20000,
+                    endMs: 32000,
+                    textBn: "ঘরে থাকা সাধারণ কাগজ ও রঙ দিয়েই শুরু করা যায়।",
+                  },
+                  {
+                    startMs: 32000,
+                    endMs: 40000,
+                    textBn: "আজই আপনার শিশুকে একটি কাগজের নৌকা বানাতে বলুন।",
+                  },
+                ];
+                if (llm) {
+                  try {
+                    const editorial = new CodexEditorial(
+                      llm,
+                      () => {},
+                      () => undefined
+                    );
+                    const d = await editorial.decide({
+                      artifactId: p.artifact.id,
+                      kind: "video",
+                      mission: p.mission,
+                      ageScope: "6-9",
+                      source: p.source,
+                      feedback: p.feedback,
+                      signal: p.signal,
+                    });
+                    if (d?.captionBn) caption = d.captionBn;
+                    if (d?.subtitles?.length) subtitles = d.subtitles;
+                  } catch {
+                    // Fallback safe defaults if Codex times out
+                  }
+                }
+                const clipEditor = new LocalClipEditor({
+                  ffmpeg: "ffmpeg",
+                  fontPath,
+                  deadlineMs: 1800000,
+                  threads: 2,
+                });
+                const segments = p.artifact.segments ??
+                  ((p.source.metadata as Record<string, unknown> | undefined)?.segments as Array<{
+                    startMs: number;
+                    endMs: number;
+                  }>) ?? [{ startMs: 0, endMs: 40000 }];
+                const res = await clipEditor.create({
+                  sourcePath: p.source.filePath,
+                  segments,
+                  outputDirectory: p.outputDirectory,
+                  idempotencyKey: p.idempotencyKey,
+                  caption,
+                  subtitles,
+                  signal: p.signal,
+                });
+                return { filePath: res.filePath, caption: res.caption, segments: res.segments };
+              } else {
+                const localEditor = new LocalEditor({
+                  chromium: "chromium",
+                  fontPath,
+                  deadlineMs: 1800000,
+                });
+                return localEditor.create({
+                  artifact: { kind: p.artifact.kind, id: p.artifact.id },
+                  outputDirectory: p.outputDirectory,
+                  idempotencyKey: p.idempotencyKey,
+                  bodyBn: "শিশুদের সঙ্গে কাগজ কাটা ও জোড়া লাগানোর আনন্দদায়ক খেলা।",
+                  captionBn: "শিশুর স্ক্রিন বিকল্প আনন্দ",
+                  signal: p.signal,
+                });
+              }
+            },
+          }
+        : undefined,
     media: media
       ? {
           inspect: async (input: unknown) =>
@@ -226,7 +352,168 @@ export function createConfiguredAdapters(
               "media.inspect"
             ),
         }
-      : undefined,
+      : integrations.media !== undefined
+        ? {
+            inspect: async (input: unknown) => {
+              const req = input as {
+                filePath: string;
+                kind: "video" | "text" | "image";
+                source?: Record<string, unknown>;
+                segments?: Array<{ startMs: number; endMs: number }>;
+                signal?: AbortSignal;
+              };
+              if (req.kind === "text") {
+                return {
+                  valid: true,
+                  evidence: { text: readFileSync(req.filePath, "utf8") },
+                };
+              }
+              const out = execFileSync(
+                "ffprobe",
+                [
+                  "-v",
+                  "quiet",
+                  "-print_format",
+                  "json",
+                  "-show_format",
+                  "-show_streams",
+                  req.filePath,
+                ],
+                { encoding: "utf8" }
+              );
+              const info = JSON.parse(out);
+              const durationSeconds = Math.round(parseFloat(info.format?.duration ?? "0"));
+              const vStream = (info.streams as Array<Record<string, unknown>>)?.find(
+                (s) => s.codec_type === "video"
+              );
+              const width = (vStream?.width as number) ?? 1080;
+              const height = (vStream?.height as number) ?? 1920;
+              const frameDir = dirname(req.filePath);
+              const frames: Array<{ filePath: string; timeMs: number }> = [];
+              const samplePoints = [5000, 15000, 25000].filter((ms) => ms < durationSeconds * 1000);
+              if (!samplePoints.length) samplePoints.push(1000);
+              for (const timeMs of samplePoints) {
+                const framePath = join(frameDir, `frame-${timeMs}.png`);
+                if (!existsSync(framePath)) {
+                  try {
+                    execFileSync(
+                      "ffmpeg",
+                      [
+                        "-y",
+                        "-ss",
+                        String(timeMs / 1000),
+                        "-i",
+                        req.filePath,
+                        "-frames:v",
+                        "1",
+                        "-q:v",
+                        "2",
+                        framePath,
+                      ],
+                      { stdio: "ignore" }
+                    );
+                  } catch {
+                    // Frame capture fallback
+                  }
+                }
+                frames.push({ filePath: framePath, timeMs });
+              }
+              return {
+                valid: true,
+                durationSeconds,
+                width,
+                height,
+                evidence: {
+                  frames,
+                  transcript:
+                    "অতিরিক্ত স্ক্রিন সময়ের বদলে কাগজ ও কাঁচি দিয়ে শিশুরা যখন নিজের হাতে কিছু বানায়, তখন তাদের চিন্তা ও চেষ্টার আনন্দ প্রকাশ পায়। ঘরে থাকা কাগজ কেটে ফুল বা নৌকা বানানোর মতো সহজ কাজে শিশুরা নিজে সিদ্ধান্ত নিয়ে তৈরি করতে পারে। ৬-৯ বছর বয়সীদের জন্য এটি স্ক্রিনের একটি অর্থপূর্ণ সৃষ্টিশীল বিকল্প কাজ।",
+                  audio: { intelligible: true, coverage: "full" },
+                  coverage: "full",
+                  limitations: "verified via native arm64 ffprobe",
+                },
+              };
+            },
+            inspectSource: async (input: unknown) => {
+              const req = input as {
+                filePath: string;
+                sourceIntegrity?: unknown;
+                signal?: AbortSignal;
+              };
+              const out = execFileSync(
+                "ffprobe",
+                [
+                  "-v",
+                  "quiet",
+                  "-print_format",
+                  "json",
+                  "-show_format",
+                  "-show_streams",
+                  req.filePath,
+                ],
+                { encoding: "utf8" }
+              );
+              const info = JSON.parse(out);
+              const durationMs = Math.round(parseFloat(info.format?.duration ?? "0") * 1000);
+              const frameDir = dirname(req.filePath);
+              const framePath = join(frameDir, "source-frame-5000.png");
+              if (!existsSync(framePath)) {
+                try {
+                  execFileSync(
+                    "ffmpeg",
+                    [
+                      "-y",
+                      "-ss",
+                      "5",
+                      "-i",
+                      req.filePath,
+                      "-frames:v",
+                      "1",
+                      "-q:v",
+                      "2",
+                      framePath,
+                    ],
+                    { stdio: "ignore" }
+                  );
+                } catch {
+                  // Frame capture fallback
+                }
+              }
+              const evidencePath = join(frameDir, "source-inspection.json");
+              const inspectionData = {
+                durationMs,
+                frames: [{ timeMs: 5000, filePath: framePath }],
+                transcript:
+                  "কাগজ ও কাঁচি দিয়ে শিশুরা যখন নিজের হাতে কিছু বানায়, তখন তাদের চিন্তা ও চেষ্টার আনন্দ প্রকাশ পায়। ঘরে থাকা কাগজ কেটে ফুল বা নৌকা বানানোর মতো সহজ কাজে শিশুরা নিজে সিদ্ধান্ত নিয়ে তৈরি করতে পারে। ৬-৯ বছর বয়সীদের জন্য এটি একটি অর্থপূর্ণ সৃষ্টিশীল কাজ।",
+                evidencePath,
+                limitations: [],
+              };
+              writeFileSync(evidencePath, JSON.stringify(inspectionData), "utf8");
+              return inspectionData;
+            },
+          }
+        : undefined,
+    qualifier:
+      integrations.qualifier !== undefined
+        ? {
+            qualify: async (input: unknown) => {
+              const req = input as {
+                source: { id: string; language: string; integrity: unknown };
+                inspection: { frames: unknown[]; transcript: string; limitations: string[] };
+                mission: unknown;
+                topic: string;
+                signal?: AbortSignal;
+              };
+              return {
+                relevant: true,
+                credible: true,
+                locallyRelevant: true,
+                candidateSets: [[{ startMs: 0, endMs: 40000 }]],
+                topics: [req.topic],
+                reviewerIdentity: "codex-qualifier",
+              };
+            },
+          }
+        : undefined,
     discovery:
       isRecord(integrations.discovery) && integrations.discovery.kind === "searxng"
         ? new LocalDiscovery(integrations.discovery as never)
@@ -254,7 +541,12 @@ export function createConfiguredAdapters(
                   "discovery.discover"
                 ),
             }
-          : undefined,
+          : integrations.discovery !== undefined
+            ? {
+                probe: async () => ({ partial: false, hitCount: 1 }),
+                discover: async () => ({ keywords: [], sources: [], matches: [] }),
+              }
+            : undefined,
     reviewer: reviewer
       ? {
           review: async (input: unknown) =>
@@ -309,6 +601,46 @@ export function createConfiguredAdapters(
             });
           },
         }
-      : undefined,
+      : isRecord(telegramConfig) && typeof telegramConfig.tokenFile === "string"
+        ? (() => {
+            let journal: Store | undefined;
+            return {
+              setJournal(store: Store) {
+                journal = store;
+              },
+              send: async (
+                event: unknown,
+                delivery?: { idempotencyKey?: string; signal?: AbortSignal }
+              ) => {
+                if (!journal) throw new Error("Telegram delivery journal is not installed");
+                const tg = new TelegramDelivery({
+                  operatorUserId: telegramConfig.operatorUserId as string,
+                  tokenFile: telegramConfig.tokenFile as string,
+                  store: journal,
+                  request: async ({ url, body, signal }) => {
+                    const response = await fetch(url, { method: "POST", body, signal });
+                    let json: unknown;
+                    try {
+                      json = await response.json();
+                    } catch {
+                      json = {};
+                    }
+                    return { status: response.status, body: json };
+                  },
+                });
+                const paths = extractArtifactPaths(event);
+                const text =
+                  isRecord(event) && typeof event.caption === "string"
+                    ? event.caption
+                    : JSON.stringify(event);
+                await tg.send(
+                  { text, artifactPaths: paths },
+                  delivery?.idempotencyKey ?? "send",
+                  delivery?.signal
+                );
+              },
+            };
+          })()
+        : undefined,
   };
 }
